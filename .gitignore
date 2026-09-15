@@ -1,0 +1,15 @@
+# Ambienti virtuali Python
+venv/
+.venv/
+
+# Cache Python in qualsiasi cartella
+__pycache__/
+*.py[cod]
+
+# Configurazione IDE
+.idea/
+
+# Dati locali
+data/
+
+checkpoint

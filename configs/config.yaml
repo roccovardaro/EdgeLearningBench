@@ -1,0 +1,74 @@
+dataset:
+  name: cifar10
+
+# Cambia qui per switchare paradigma: ff_resnet | ff_mlp | resnet | kan | cnn_kan
+paradigm: cnn_kan
+
+
+# ── Configurazione FF-MLP ────────────────────────────────────
+ff_mlp:
+  model:
+    input_dim: 3072          # 3×32×32 per CIFAR-10  (784 per MNIST)
+    num_classes: 10
+    hidden_dims: [2000, 2000, 2000, 2000]
+    checkpoint_name: ff_mlp.pt
+  train:
+    epochs_per_layer: 30
+    lr: 0.03
+    threshold: 2.0
+    batch_size: 512
+  eval:
+    batch_size: 512
+
+
+# ── Configurazione ResNet (backpropagation) ──────────────────
+resnet:
+  model:
+    in_channels: 3
+    num_classes: 10
+    checkpoint_name: resnet.pt
+  train:
+    epochs: 20
+    lr: 0.001
+    batch_size: 128
+  eval:
+    batch_size: 128
+
+
+# ── Configurazione KAN (backpropagation) ─────────────────────
+kan:
+  model:
+    input_dim: 3072           # 3×32×32 per CIFAR-10
+    num_classes: 10
+    hidden_dims: [128, 64]     # Layer intermedi KAN (pochi neuroni perché ogni connessione è una B-spline)
+    grid_size: 5              # Numero di intervalli nella griglia B-spline
+    spline_order: 3           # Ordine delle B-spline
+    checkpoint_name: kan.pt
+  train:
+    epochs: 20
+    lr: 0.001
+    batch_size: 128
+    weight_decay: 0.0001
+    regularization_lambda: 0.01
+  eval:
+    batch_size: 128
+
+
+# ── Configurazione CNN-KAN (backpropagation) ─────────────────
+cnn_kan:
+  model:
+    in_channels: 3              # Canali dell'immagine
+    num_classes: 10
+    cnn_channels: [32, 64, 128] # Canali dei 3 blocchi conv
+    hidden_dims: [64]           # Layer KAN (ridotti, input già compatto dalla CNN)
+    grid_size: 5                # Numero di intervalli nella griglia B-spline
+    spline_order: 3             # Ordine delle B-spline
+    checkpoint_name: cnn_kan.pt
+  train:
+    epochs: 20
+    lr: 0.001
+    batch_size: 128
+    weight_decay: 0.0001
+    regularization_lambda: 0.01
+  eval:
+    batch_size: 128
