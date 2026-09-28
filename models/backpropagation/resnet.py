@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from typing import Any, List, Optional
 
 from paths import CHECKPOINT_DIR
@@ -57,6 +58,8 @@ class ResNet(nn.Module):
     def __init__(self, block, layers, num_classes, in_channels=3):
         super(ResNet, self).__init__()
         self.inplanes = 16
+
+        #CONVOLUZIONE INZIALE
         self.conv1 = conv3x3(in_channels, 16)
         self.bn1 = nn.BatchNorm2d(16)
         self.relu = nn.ReLU(inplace=True)
@@ -91,7 +94,7 @@ class ResNet(nn.Module):
         for _ in range(1, blocks):
             layers.append(block(self.inplanes, planes))
 
-        return nn.Sequential(*layers)
+        return nn.Sequential(*layers) #nn.Sequential(blocco1, blocco2, blocco3)
 
     def forward(self, x):
         x = self.conv1(x)
@@ -189,8 +192,11 @@ def resnet_run(args, train_loader, test_loader):
     print(f"Device: {device}")
 
     model = resnet56(num_classes=num_classes, in_channels=in_channels).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.AdamW(
+    model.parameters(), lr=lr, weight_decay=1e-4
+)
+    scheduler = CosineAnnealingLR(optimizer, T_max=epochs)
+    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
 
     # ── Training ────────────────────────────────────────────────
     for epoch in range(epochs):
@@ -210,10 +216,13 @@ def resnet_run(args, train_loader, test_loader):
             correct += (outputs.argmax(1) == labels).sum().item()
             total += labels.size(0)
 
+        scheduler.step()
+
         print(
             f"Epoch {epoch + 1:3d}/{epochs} | "
             f"loss={running_loss / total:.4f} | "
-            f"train_acc={correct / total:.4f}"
+            f"train_acc={correct / total:.4f} | "
+            f"lr={scheduler.get_last_lr()[0]:.6f}"
         )
 
     # ── Valutazione ─────────────────────────────────────────────

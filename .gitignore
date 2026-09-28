@@ -1,6 +1,7 @@
 # Ambienti virtuali Python
 venv/
 .venv/
+.DS_Store
 
 # Cache Python in qualsiasi cartella
 __pycache__/

@@ -1,14 +1,9 @@
 """CNN-KAN: modello ibrido con CNN feature extractor + KAN classifier.
-
-Una piccola CNN (3 blocchi conv) estrae feature spaziali e riduce la
-dimensionalità dell'immagine.  I layer KAN (B-spline) lavorano poi su
-uno spazio compatto, risultando più efficienti e accurati rispetto
-al KAN puro applicato direttamente sui pixel.
-
 """
 
 import torch
 import torch.nn as nn
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from efficient_kan import KAN
 
 from paths import CHECKPOINT_DIR
@@ -40,7 +35,7 @@ class CNNFeatureExtractor(nn.Module):
             ch_in = ch_out
 
         self.features = nn.Sequential(*layers)
-        self.pool = nn.AdaptiveAvgPool2d(1)
+        self.pool = nn.AdaptiveAvgPool2d(1) #calcola la media di ogni canale su tutte le posizioni spaziali, producendo un solo valore per canale.
         self.out_dim = cnn_channels[-1]
 
     def forward(self, x):
@@ -165,6 +160,7 @@ def cnn_kan_run(args, train_loader, test_loader):
     ).to(device)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    scheduler = CosineAnnealingLR(optimizer, T_max=epochs)
     criterion = nn.CrossEntropyLoss()
 
     # ── Training ────────────────────────────────────────────────
@@ -190,10 +186,13 @@ def cnn_kan_run(args, train_loader, test_loader):
             correct += (outputs.argmax(1) == labels).sum().item()
             total += labels.size(0)
 
+        scheduler.step()
+
         print(
             f"Epoch {epoch + 1:3d}/{epochs} | "
             f"loss={running_loss / total:.4f} | "
-            f"train_acc={correct / total:.4f}"
+            f"train_acc={correct / total:.4f} | "
+            f"lr={scheduler.get_last_lr()[0]:.6f}"
         )
 
     # ── Valutazione ─────────────────────────────────────────────

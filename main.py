@@ -1,15 +1,19 @@
 from argument import get_args
 from datasets.dataset import get_dataloaders
-from models.ff_mlp import ff_mlp_run
+from models.forward_forward.ff_mlp import ff_mlp_run
+from models.forward_forward.ff_resnet import ff_resnet_run
 from models.backpropagation.resnet import resnet_run
 from models.backpropagation.kan import kan_run
 from models.backpropagation.cnn_kan import cnn_kan_run
+from models.backpropagation.mlp import mlp_run
 
 _PARADIGMS = {
     "ff_mlp": ff_mlp_run,
+    "ff_resnet": ff_resnet_run,
     "resnet": resnet_run,
     "kan": kan_run,
     "cnn_kan": cnn_kan_run,
+    "mlp": mlp_run,
 }
 
 

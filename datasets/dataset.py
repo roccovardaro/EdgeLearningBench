@@ -3,9 +3,11 @@ from datasets.mnist import mnist_loaders
 
 
 def get_dataloaders(args):
+    augment = getattr(args.dataset, "augmentation", False)
 
     if args.dataset.name == "mnist":
         return mnist_loaders()
     if args.dataset.name == "cifar10":
-        return cifar10_dataloaders()
+        return cifar10_dataloaders(augment=augment)
     return None
+

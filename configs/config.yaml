@@ -1,8 +1,9 @@
 dataset:
   name: cifar10
+  augmentation: true      # true = RandomCrop + RandomHorizontalFlip sul train set
 
-# Cambia qui per switchare paradigma: ff_resnet | ff_mlp | resnet | kan | cnn_kan
-paradigm: cnn_kan
+# Switch Paradigma: ff_resnet | ff_mlp | resnet | kan | mlp | cnn_kan
+paradigm: mlp
 
 
 # ── Configurazione FF-MLP ────────────────────────────────────
@@ -40,16 +41,35 @@ kan:
   model:
     input_dim: 3072           # 3×32×32 per CIFAR-10
     num_classes: 10
-    hidden_dims: [128, 64]     # Layer intermedi KAN (pochi neuroni perché ogni connessione è una B-spline)
-    grid_size: 5              # Numero di intervalli nella griglia B-spline
+    hidden_dims: [256, 128]    # Layer intermedi KAN
+    grid_size: 8              # Griglia B-spline
     spline_order: 3           # Ordine delle B-spline
+    bottleneck_dim: 256       # Proiezione lineare 3072 → 256 prima del KAN
+    dropout: 0.1             
     checkpoint_name: kan.pt
   train:
-    epochs: 20
-    lr: 0.001
+    epochs: 50                
+    lr: 0.002                
     batch_size: 128
     weight_decay: 0.0001
-    regularization_lambda: 0.01
+    regularization_lambda: 0.005 
+  eval:
+    batch_size: 128
+
+
+# ── Configurazione MLP (backpropagation) ─────────────────────
+mlp:
+  model:
+    input_dim: 3072
+    num_classes: 10
+    hidden_dims: [512, 256]
+    dropout: 0.2
+    checkpoint_name: mlp.pt
+  train:
+    epochs: 50
+    lr: 0.002
+    batch_size: 128
+    weight_decay: 0.0001
   eval:
     batch_size: 128
 
@@ -57,18 +77,35 @@ kan:
 # ── Configurazione CNN-KAN (backpropagation) ─────────────────
 cnn_kan:
   model:
-    in_channels: 3              # Canali dell'immagine
+    in_channels: 3             
     num_classes: 10
-    cnn_channels: [32, 64, 128] # Canali dei 3 blocchi conv
-    hidden_dims: [64]           # Layer KAN (ridotti, input già compatto dalla CNN)
-    grid_size: 5                # Numero di intervalli nella griglia B-spline
-    spline_order: 3             # Ordine delle B-spline
+    cnn_channels: [64, 128, 256]
+    hidden_dims: [128, 64]       
+    grid_size: 8                 
+    spline_order: 3              
     checkpoint_name: cnn_kan.pt
   train:
-    epochs: 20
-    lr: 0.001
-    batch_size: 128
-    weight_decay: 0.0001
-    regularization_lambda: 0.01
+    epochs: 10                   
+    lr: 0.005                   
+    batch_size: 64               
+    weight_decay: 0.0005        
+    regularization_lambda: 0.005 
   eval:
     batch_size: 128
+
+
+# ── Configurazione FF-ResNet (Forward-Forward) ───────────────
+ff_resnet:
+  model:
+    in_channels: 3
+    num_classes: 10
+    threshold: 1.0
+    checkpoint_name: ff_resnet.pt
+  train:
+    epochs_per_layer: 30
+    lr: 0.001
+    batch_size: 128
+  eval:
+    batch_size: 128
+
+
