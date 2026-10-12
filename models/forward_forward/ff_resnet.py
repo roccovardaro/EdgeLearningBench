@@ -8,12 +8,10 @@ from torch import nn
 from torch.nn import functional as F
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
+from paths import CHECKPOINT_DIR
 
-try:
-    from tqdm import tqdm
-except ImportError:
-    def tqdm(iterable, **kwargs):
-        return iterable
+from device import get_device
+
 
 
 def overlay_label_channels(images, labels, num_classes):
@@ -56,9 +54,7 @@ class FFResidualBlock(nn.Module):
 
     def __init__(self, in_channels, out_channels, stride=1):
         super().__init__()
-        self.conv1 = nn.Conv2d(
-            in_channels, out_channels, 3, stride=stride, padding=1, bias=False
-        )
+        self.conv1 = nn.Conv2d(in_channels, out_channels, 3, stride=stride, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(out_channels)
         self.conv2 = nn.Conv2d(out_channels, out_channels, 3, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(out_channels)
@@ -169,10 +165,9 @@ class FFResNet(nn.Module):
 
 
 
-    def fit(self, train_loader, epochs_per_layer=100, lr=0.001, device="cuda"):
-        """Addestramento greedy; anche una seconda chiamata riabilita i gradienti."""
-        if epochs_per_layer < 1 or lr <= 0:
-            raise ValueError("epochs_per_layer e lr devono essere positivi")
+    def fit(self, train_loader, epochs_per_layer=100, lr=0.001, device=None):
+        """Addestramento"""
+        device = get_device(device)
         self.to(device)
         self.eval()
         self.requires_grad_(False)
@@ -188,8 +183,7 @@ class FFResNet(nn.Module):
             for epoch in range(epochs_per_layer):
                 total_loss = total_pos = total_neg = total_pairs = 0.0
                 total_samples = 0
-                progress = tqdm(train_loader, desc=f"Block {block_idx + 1} Epoch {epoch + 1}")
-                for images, labels in progress:
+                for images, labels in train_loader:
                     images = images.to(device)
                     labels = labels.to(device=device, dtype=torch.long)
                     bs = labels.shape[0]
@@ -221,11 +215,12 @@ class FFResNet(nn.Module):
                     total_neg += g_neg.detach().sum().item()
                     total_pairs += (g_pos.detach() > g_neg.detach()).sum().item()
                     total_samples += bs
-                    if hasattr(progress, "set_postfix"):
-                        progress.set_postfix(loss=f"{loss.item():.4f}")
 
                 if total_samples == 0:
                     raise ValueError("train_loader e' vuoto")
+
+                scheduler.step()
+
                 record = {
                     "block": block_idx + 1,
                     "epoch": epoch + 1,
@@ -236,10 +231,11 @@ class FFResNet(nn.Module):
                 }
                 self.history.append(record)
                 print(
-                    f"  loss={record['loss']:.4f} | g+={record['g_pos']:.4f} | "
-                    f"g-={record['g_neg']:.4f} | pair_acc={record['pair_accuracy']:.2%}"
+                    f"Epoch {epoch + 1:3d}/{epochs_per_layer} | "
+                    f"loss={total_loss / total_samples:.4f} | "
+                    f"train_acc={total_pairs / total_samples:.4f} | "
+                    f"lr={scheduler.get_last_lr()[0]:.6f}"
                 )
-                scheduler.step()
 
             block.eval()
             block.requires_grad_(False)
@@ -250,10 +246,11 @@ class FFResNet(nn.Module):
 
 
 @torch.no_grad()
-def accuracy(model, loader, device="cuda"):
+def accuracy(model, loader, device=None):
+    device = get_device(device)
     correct = total = 0
     model.eval()
-    for images, labels in tqdm(loader, desc="Evaluation"):
+    for images, labels in loader:
         images = images.to(device)
         labels = labels.to(device=device, dtype=torch.long)
         correct += (model.predict(images) == labels).sum().item()
@@ -264,29 +261,39 @@ def accuracy(model, loader, device="cuda"):
     return correct / total
 
 
-def ff_resnet_run(args, train_loader, test_loader):
-    # Mantiene il percorso di salvataggio del progetto originale.
-    from paths import CHECKPOINT_DIR
-
-    device = torch.device(
-        "cuda" if torch.cuda.is_available()
-        else "mps" if torch.backends.mps.is_available()
-        else "cpu"
-    )
+def ff_resnet_run(args, train_loader, test_loader, profiler=None, device=None):
+    device = get_device(device)
     model_config = {
         "num_classes": args.model.num_classes,
         "in_channels": args.model.in_channels,
         "threshold": args.model.threshold,
-        "layers": [2, 2, 2],
+        "layers": [4, 4, 4],
     }
-    print(f"Device: {device}")
     model = FFResNet(**model_config)
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"FF-ResNet layers: {model_config['layers']} | in_channels={model_config['in_channels']} | classes={model_config['num_classes']}")
+    print(f"Threshold: {model_config['threshold']}")
+    print(f"Parametri totali: {total_params:,}")
+
     model.fit(train_loader, args.train.epochs_per_layer, args.train.lr, device)
-    # Se train_loader applica augmentation, la train accuracy le include.
+    
     train_acc = accuracy(model, train_loader, device)
     test_acc = accuracy(model, test_loader, device)
-    print(f"Train accuracy: {train_acc:.2%}")
-    print(f"Test accuracy:  {test_acc:.2%}")
+    print(f"Train accuracy: {train_acc:.4f}  (error: {1 - train_acc:.4f})")
+    print(f"Test  accuracy: {test_acc:.4f}  (error: {1 - test_acc:.4f})")
+
+    if profiler:
+        for idx, rec in enumerate(model.history):
+            profiler.log_epoch(
+                epoch=idx + 1,
+                loss=rec["loss"],
+                acc=rec.get("pair_accuracy"),
+                block=rec.get("block"),
+                block_epoch=rec.get("epoch"),
+                g_pos=rec.get("g_pos"),
+                g_neg=rec.get("g_neg"),
+            )
+        profiler.log_eval(train_acc, test_acc)
 
     checkpoint_path = Path(CHECKPOINT_DIR) / args.model.checkpoint_name
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)

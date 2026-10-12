@@ -13,4 +13,5 @@ __pycache__/
 # Dati locali
 data/
 
-checkpoint
+checkpoint/
+results/

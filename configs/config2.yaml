@@ -1,0 +1,231 @@
+dataset:
+  name: cifar10
+  augmentation: true      # Data augmentation (RandomCrop + RandomHorizontalFlip sul train set)
+  normalize: true
+
+# Switch Paradigma: ff_resnet | ff_mlp | resnet | kan | mlp | cnn_kan | snn_mlp | snn_cnn | ltc | cnn_ltc
+paradigm: kan
+
+# Dispositivo di calcolo: auto | cuda | cuda:0 | mps | cpu
+device: auto
+
+
+# ==============================================================================
+# TRACCIA 1: PARADIGMI DENSI / FULLY CONNECTED (Allineamento a ~1.7M parametri)
+# Tutti i modelli di questa traccia hanno una capacità comparabile (~1.6M - 1.76M)
+# per un benchmark equo su CIFAR-10 appiattito (dimensione 3072).
+# ==============================================================================
+
+# ── MLP Standard (Backpropagation) ───────────────────────────
+# Target capacità: ~1.71M parametri (3072 → 512 → 256 → 10 con BatchNorm)
+# Funge da baseline di riferimento per tutti i modelli densi.
+mlp:
+  model:
+    input_dim: 3072          # 3×32×32 per CIFAR-10
+    num_classes: 10
+    hidden_dims: [512, 256]
+    dropout: 0.2
+    checkpoint_name: mlp.pt
+  train:
+    epochs: 30               # Epoche bilanciate per convergenza stabile
+    lr: 0.002
+    batch_size: 128
+    weight_decay: 0.0001
+  eval:
+    batch_size: 128
+
+
+# ── FF-MLP (Forward-Forward Hinton) ──────────────────────────
+# Allineato a ~1.70M parametri (3072 → 512 → 256) per parità con MLP.
+# In config.yaml era [2000, 2000, 2000, 2000] (>18M parametri, non confrontabile).
+ff_mlp:
+  model:
+    input_dim: 3072          # 3×32×32 per CIFAR-10
+    num_classes: 10
+    hidden_dims: [512, 256]  # Allineato a MLP (~1.70M parametri)
+    checkpoint_name: ff_mlp.pt
+  train:
+    epochs_per_layer: 30     # Epoche greedy per ciascun layer indipendente
+    lr: 0.03
+    threshold: 2.0
+    batch_size: 512
+  eval:
+    batch_size: 512
+
+
+# ── KAN (Kolmogorov-Arnold Network) ───────────────────────────
+# Allineato a ~1.76M parametri totali:
+# Proiezione lineare 3072 → 384 (~1.18M) + KAN [384, 128, 64, 10] con grid_size=5 (~0.58M).
+# In config.yaml grid_size=8 con hidden [256, 128] causava esplosione dei coefficienti B-spline.
+kan:
+  model:
+    input_dim: 3072          # 3×32×32 per CIFAR-10
+    num_classes: 10
+    hidden_dims: [128, 64]   # Layer KAN intermedi compatti
+    grid_size: 5             # Risoluzione B-spline bilanciata per stabilità e velocità
+    spline_order: 3          # B-spline cubica standard
+    bottleneck_dim: 384      # Proiezione per pareggiare la capacità a ~1.76M
+    dropout: 0.1
+    checkpoint_name: kan.pt
+  train:
+    epochs: 50               # Epoche di addestramento con CosineAnnealingLR
+    lr: 0.002
+    batch_size: 64
+    weight_decay: 0.0001
+    regularization_lambda: 0.005
+  eval:
+    batch_size: 64
+
+
+# ── SNN-MLP (Spiking Neural Network – Rate Coding) ───────────
+# Allineato a ~1.71M parametri (3072 → 512 → 256 → 10 con LIF).
+# FIX: in config.yaml input_dim era 784 (MNIST, provocava errore di shape). Corretto a 3072.
+snn_mlp:
+  model:
+    input_dim: 3072          # Corretto da 784 a 3072 per CIFAR-10
+    num_classes: 10
+    hidden_dims: [512, 256]  # Architettura identica a MLP (~1.71M parametri)
+    beta: 0.95               # Decadimento del potenziale di membrana LIF
+    num_steps: 5             # Timestep temporali di simulazione (rate coding)
+    dropout: 0.2
+    checkpoint_name: snn_mlp.pt
+  train:
+    epochs: 20
+    lr: 0.002
+    batch_size: 128
+    weight_decay: 0.0001
+    mem_weight: 1.0          # Peso loss su membrana
+    spike_weight: 1.0        # Peso loss su spike
+  eval:
+    batch_size: 128
+
+
+# ── LTC (Liquid Time-Constant Network) ───────────────────────
+# Allineato a ~1.60M parametri:
+# Proiezione 3072 → (64 × 8) = 512 (~1.57M) + cella LTC ricorrente (~20k) + head.
+# Rientra perfettamente nella medesima fascia di capacità dei modelli densi.
+ltc:
+  model:
+    input_dim: 3072          # 3×32×32 per CIFAR-10
+    num_classes: 10
+    units: 64                # Neuroni LTC Fully-Connected
+    num_steps: 8             # Timestep della sequenza temporale interna
+    dropout: 0.2
+    checkpoint_name: ltc.pt
+  train:
+    epochs: 20
+    lr: 0.001
+    batch_size: 64
+    weight_decay: 0.0001
+  eval:
+    batch_size: 128
+
+
+# ==============================================================================
+# TRACCIA 2: PARADIGMI CONVOLUZIONALI ED IBRIDI (Backbone condiviso [32, 64, 128])
+# Feature extractor identico a 3 stadi conv (~93.5k parametri) per confrontare
+# direttamente l'impatto del classificatore: KAN vs LTC vs SNN.
+# ==============================================================================
+
+# ── CNN-KAN (Backbone Convoluzionale + Classificatore KAN) ───
+# Capacità totale: ~173k parametri (Backbone ~93.5k + KAN [128, 64, 10] ~79.5k).
+# FIX: in config.yaml in_channels era 1 (grayscale/MNIST, causava crash) e cnn_channels
+# era sproporzionato [64, 128, 256] con grid_size=8 (~900k parametri).
+cnn_kan:
+  model:
+    in_channels: 3           # Corretto da 1 a 3 per CIFAR-10 RGB
+    num_classes: 10
+    cnn_channels: [32, 64, 128] # Backbone conv condiviso a 3 stadi
+    hidden_dims: [64]        # KAN classifier: 128 → 64 → 10
+    grid_size: 5             # Griglia B-spline bilanciata
+    spline_order: 3
+    checkpoint_name: cnn_kan.pt
+  train:
+    epochs: 20
+    lr: 0.005
+    batch_size: 64
+    weight_decay: 0.0005
+    regularization_lambda: 0.005
+  eval:
+    batch_size: 128
+
+
+# ── CNN-LTC (Backbone Convoluzionale + Cella LTC) ────────────
+# Capacità totale: ~181k parametri (Backbone ~93.5k + Proiezione temporale + Cella LTC ~87.5k).
+# Condivide esattamente lo stesso backbone [32, 64, 128] di CNN-KAN.
+cnn_ltc:
+  model:
+    in_channels: 3           # 3 canali RGB
+    num_classes: 10
+    cnn_channels: [32, 64, 128] # Backbone conv identico a CNN-KAN
+    units: 64                # Neuroni cella LTC
+    num_steps: 8             # Timestep sequenza
+    dropout: 0.2
+    checkpoint_name: cnn_ltc.pt
+  train:
+    epochs: 20
+    lr: 0.001
+    batch_size: 64
+    weight_decay: 0.0001
+  eval:
+    batch_size: 128
+
+
+# ── SNN-CNN (Spiking Convolutional Neural Network) ───────────
+# Backbone convoluzionale spiking a 3 stadi [32, 64, 128] + classificazione LIF.
+# Nota: con [32, 64, 128] il backbone è identico a CNN-KAN e CNN-LTC (~95k parametri).
+# Opzionale: impostare cnn_channels: [48, 96, 160] se si desidera parità a ~181k parametri.
+snn_cnn:
+  model:
+    in_channels: 3           # 3 canali RGB
+    num_classes: 10
+    cnn_channels: [32, 64, 128] # [32, 64, 128] per backbone identico (oppure [48, 96, 160] per ~181k params)
+    beta: 0.95               # Decadimento LIF
+    num_steps: 5             # Timestep di simulazione spiking
+    dropout: 0.2
+    checkpoint_name: snn_cnn.pt
+  train:
+    epochs: 20
+    lr: 0.002
+    batch_size: 64
+    weight_decay: 0.0001
+    mem_weight: 1.0
+    spike_weight: 1.0
+  eval:
+    batch_size: 128
+
+
+# ==============================================================================
+# TRACCIA 3: RESIDUAL NETWORKS (Confronto Deep Residual Standard vs Forward-Forward)
+# ==============================================================================
+
+# ── ResNet-56 (Backpropagation Standard) ─────────────────────
+# Architettura deep residual standard (~855k parametri).
+resnet:
+  model:
+    in_channels: 3
+    num_classes: 10
+    checkpoint_name: resnet.pt
+  train:
+    epochs: 20
+    lr: 0.001
+    batch_size: 128
+    weight_decay: 0.0001
+  eval:
+    batch_size: 128
+
+
+# ── FF-ResNet (Forward-Forward Residual Network) ─────────────
+# Architettura residua addestrata blocco per blocco senza backprop globale.
+ff_resnet:
+  model:
+    in_channels: 3
+    num_classes: 10
+    threshold: 1.0
+    checkpoint_name: ff_resnet.pt
+  train:
+    epochs_per_layer: 30     # Epoche di addestramento per blocco residuo
+    lr: 0.001
+    batch_size: 128
+  eval:
+    batch_size: 128

@@ -1,9 +1,10 @@
 import torch
 import torch.nn as nn
-from torch.optim.lr_scheduler import CosineAnnealingLR
 from typing import Any, List, Optional
 
+from device import get_device
 from paths import CHECKPOINT_DIR
+from models.training_setup import get_training_components
 
 def conv3x3(in_planes, out_planes, stride=1):
     """3x3 convolution with padding"""
@@ -163,8 +164,9 @@ def resnet56(
 # ── Valutazione ──────────────────────────────────────────────────────────────
 
 @torch.no_grad()
-def accuracy(model, loader, device):
+def accuracy(model, loader, device=None):
     """Calcola l'accuratezza su un DataLoader."""
+    device = get_device(device)
     model.eval()
     correct, total = 0, 0
     for images, labels in loader:
@@ -177,26 +179,23 @@ def accuracy(model, loader, device):
 
 # ── Entry point (chiamato da main.py) ────────────────────────────────────────
 
-def resnet_run(args, train_loader, test_loader):
+def resnet_run(args, train_loader, test_loader, profiler=None, device=None):
     """Addestra e valuta una ResNet con backpropagation standard."""
     epochs = args.train.epochs
     lr = args.train.lr
     in_channels = args.model.in_channels
     num_classes = args.model.num_classes
 
-    device = torch.device(
-        "cuda" if torch.cuda.is_available()
-        else "mps" if torch.backends.mps.is_available()
-        else "cpu"
-    )
-    print(f"Device: {device}")
+    device = get_device(device)
 
     model = resnet56(num_classes=num_classes, in_channels=in_channels).to(device)
-    optimizer = torch.optim.AdamW(
-    model.parameters(), lr=lr, weight_decay=1e-4
-)
-    scheduler = CosineAnnealingLR(optimizer, T_max=epochs)
-    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"ResNet layers: [9, 9, 9] (ResNet-56) | in_channels={in_channels} | classes={num_classes}")
+    print(f"Parametri totali: {total_params:,}")
+
+    optimizer, scheduler, criterion = get_training_components(
+        model, args, model_type="resnet"
+    )
 
     # ── Training ────────────────────────────────────────────────
     for epoch in range(epochs):
@@ -225,11 +224,17 @@ def resnet_run(args, train_loader, test_loader):
             f"lr={scheduler.get_last_lr()[0]:.6f}"
         )
 
+        if profiler:
+            profiler.log_epoch(epoch + 1, running_loss / total, correct / total, scheduler.get_last_lr()[0])
+
     # ── Valutazione ─────────────────────────────────────────────
     train_acc = accuracy(model, train_loader, device)
     test_acc = accuracy(model, test_loader, device)
     print(f"Train accuracy: {train_acc:.4f}  (error: {1 - train_acc:.4f})")
     print(f"Test  accuracy: {test_acc:.4f}  (error: {1 - test_acc:.4f})")
+
+    if profiler:
+        profiler.log_eval(train_acc, test_acc)
 
     # ── Checkpoint ──────────────────────────────────────────────
     checkpoint_path = CHECKPOINT_DIR / args.model.checkpoint_name

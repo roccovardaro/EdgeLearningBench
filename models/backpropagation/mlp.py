@@ -1,18 +1,17 @@
 """
-MLP (Multi-Layer Perceptron) per classificazione di immagini, addestrato con backpropagation standard.
+RETE MLP
 """
 import torch
 import torch.nn as nn
-from torch.optim.lr_scheduler import CosineAnnealingLR
-
+from device import get_device
 from paths import CHECKPOINT_DIR
+from models.training_setup import get_training_components
 
 
 # ── Modello ──────────────────────────────────────────────────────────────────
 
 class MLPClassifier(nn.Module):
-    """MLP con flatten automatico dell'input e layer nascosti configurabili.
-
+    """
     Architettura per blocco: Linear → BatchNorm1d → ReLU → Dropout
     """
 
@@ -37,7 +36,7 @@ class MLPClassifier(nn.Module):
         self.net = nn.Sequential(*layers)
 
     def forward(self, x):
-        """Forward pass con flatten automatico [B, C, H, W] → [B, D]."""
+        """[B, C, H, W] → [B, D]."""
         x = x.flatten(1)
         return self.net(x)
 
@@ -45,7 +44,7 @@ class MLPClassifier(nn.Module):
 # ── Factory ──────────────────────────────────────────────────────────────────
 
 def build_mlp(input_dim, num_classes, hidden_dims=(512, 256), dropout=0.2):
-    """Costruisce un MLPClassifier con i parametri specificati."""
+    """Costruisce un MLPClassifier"""
     model = MLPClassifier(
         input_dim=input_dim,
         num_classes=num_classes,
@@ -62,8 +61,9 @@ def build_mlp(input_dim, num_classes, hidden_dims=(512, 256), dropout=0.2):
 # ── Valutazione ──────────────────────────────────────────────────────────────
 
 @torch.no_grad()
-def accuracy(model, loader, device):
+def accuracy(model, loader, device=None):
     """Calcola l'accuratezza su un DataLoader."""
+    device = get_device(device)
     model.eval()
     correct, total = 0, 0
     for images, labels in loader:
@@ -76,7 +76,7 @@ def accuracy(model, loader, device):
 
 # ── Entry point (chiamato da main.py) ────────────────────────────────────────
 
-def mlp_run(args, train_loader, test_loader):
+def mlp_run(args, train_loader, test_loader, profiler=None, device=None):
     """Addestra e valuta un MLP con backpropagation standard."""
     epochs = args.train.epochs
     lr = args.train.lr
@@ -87,12 +87,7 @@ def mlp_run(args, train_loader, test_loader):
     hidden_dims = tuple(args.model.hidden_dims)
     dropout = getattr(args.model, "dropout", 0.2)
 
-    device = torch.device(
-        "cuda" if torch.cuda.is_available()
-        else "mps" if torch.backends.mps.is_available()
-        else "cpu"
-    )
-    print(f"Device: {device}")
+    device = get_device(device)
 
     model = build_mlp(
         input_dim=input_dim,
@@ -101,9 +96,9 @@ def mlp_run(args, train_loader, test_loader):
         dropout=dropout,
     ).to(device)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-    scheduler = CosineAnnealingLR(optimizer, T_max=epochs)
-    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
+    optimizer, scheduler, criterion = get_training_components(
+        model, args, model_type="mlp"
+    )
 
     # ── Training ────────────────────────────────────────────────
     for epoch in range(epochs):
@@ -132,11 +127,17 @@ def mlp_run(args, train_loader, test_loader):
             f"lr={scheduler.get_last_lr()[0]:.6f}"
         )
 
+        if profiler:
+            profiler.log_epoch(epoch + 1, running_loss / total, correct / total, scheduler.get_last_lr()[0])
+
     # ── Valutazione ─────────────────────────────────────────────
     train_acc = accuracy(model, train_loader, device)
     test_acc = accuracy(model, test_loader, device)
     print(f"Train accuracy: {train_acc:.4f}  (error: {1 - train_acc:.4f})")
     print(f"Test  accuracy: {test_acc:.4f}  (error: {1 - test_acc:.4f})")
+
+    if profiler:
+        profiler.log_eval(train_acc, test_acc)
 
     # ── Checkpoint ──────────────────────────────────────────────
     checkpoint_path = CHECKPOINT_DIR / args.model.checkpoint_name

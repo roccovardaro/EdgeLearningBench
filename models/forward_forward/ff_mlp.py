@@ -15,8 +15,7 @@ import torch
 import torch.nn as nn
 from torch.optim import Adam
 from torch.nn import functional as F
-from tqdm import tqdm
-
+from device import get_device
 from paths import CHECKPOINT_DIR
 
 
@@ -94,7 +93,8 @@ class FFNet(nn.Module):
 
     # ── Training ─────────────────────────────────────────────────────────
 
-    def fit(self, train_loader, epochs_per_layer=100, lr=0.03, device="cuda"):
+    def fit(self, train_loader, epochs_per_layer=100, lr=0.03, device=None, profiler=None):
+        device = get_device(device)
         self.to(device)
 
         for layer_idx, layer in enumerate(self.layers):
@@ -102,14 +102,9 @@ class FFNet(nn.Module):
             optimizer = Adam(layer.parameters(), lr=lr)
 
             for epoch in range(epochs_per_layer):
-                total_loss, total_pos, total_neg, total_samples = 0.0, 0.0, 0.0, 0
+                total_loss, correct, total = 0.0, 0, 0
 
-                progress = tqdm(
-                    train_loader,
-                    desc=f"Layer {layer_idx + 1} Epoch {epoch + 1}",
-                )
-
-                for images, labels in progress:
+                for images, labels in train_loader:
                     images, labels = images.to(device), labels.to(device)
                     bs = labels.shape[0]
 
@@ -142,22 +137,24 @@ class FFNet(nn.Module):
 
                     # Statistiche
                     total_loss += loss.item() * bs
-                    total_pos += g_pos.mean().item() * bs
-                    total_neg += g_neg.mean().item() * bs
-                    total_samples += bs
-
-                    progress.set_postfix({
-                        "loss": f"{loss.item():.4f}",
-                        "g+": f"{g_pos.mean().item():.3f}",
-                        "g-": f"{g_neg.mean().item():.3f}",
-                    })
+                    correct += (g_pos > g_neg).sum().item()
+                    total += bs
 
                 print(
-                    f"  Epoch {epoch + 1:3d} | "
-                    f"loss={total_loss / total_samples:.4f} | "
-                    f"g+={total_pos / total_samples:.4f} | "
-                    f"g-={total_neg / total_samples:.4f}"
+                    f"Epoch {epoch + 1:3d}/{epochs_per_layer} | "
+                    f"loss={total_loss / total:.4f} | "
+                    f"train_acc={correct / total:.4f} | "
+                    f"lr={optimizer.param_groups[0]['lr']:.6f}"
                 )
+
+                if profiler:
+                    profiler.log_epoch(
+                        epoch=layer_idx * epochs_per_layer + epoch + 1,
+                        loss=total_loss / total,
+                        acc=correct / total,
+                        layer=layer_idx + 1,
+                        lr=optimizer.param_groups[0]["lr"],
+                    )
 
             # Layer completato: congela
             layer.requires_grad_(False)
@@ -191,11 +188,12 @@ class FFNet(nn.Module):
 # ── Accuracy ─────────────────────────────────────────────────────────────────
 
 @torch.no_grad()
-def accuracy(model, loader, device="cuda"):
+def accuracy(model, loader, device=None):
     """Calcola l'accuratezza su un DataLoader."""
+    device = get_device(device)
     model.eval()
     correct, total = 0, 0
-    for images, labels in tqdm(loader, desc="Evaluation"):
+    for images, labels in loader:
         images, labels = images.to(device), labels.to(device)
         correct += (model.predict(images) == labels).sum().item()
         total += labels.shape[0]
@@ -204,7 +202,7 @@ def accuracy(model, loader, device="cuda"):
 
 # ── Entry point (chiamato da main.py) ────────────────────────────────────────
 
-def ff_mlp_run(args, train_loader, test_loader):
+def ff_mlp_run(args, train_loader, test_loader, profiler=None, device=None):
     """Addestra e valuta un FF-MLP con i parametri da config."""
     epochs_per_layer = args.train.epochs_per_layer
     lr = args.train.lr
@@ -214,21 +212,23 @@ def ff_mlp_run(args, train_loader, test_loader):
     num_classes = args.model.num_classes
     hidden_dims = tuple(args.model.hidden_dims)
 
-    device = torch.device(
-        "cuda" if torch.cuda.is_available()
-        else "mps" if torch.backends.mps.is_available()
-        else "cpu"
-    )
-    print(f"Device: {device}")
+    device = get_device(device)
 
     model = FFNet(input_dim=input_dim, num_classes=num_classes,
                   hidden_dims=hidden_dims, threshold=threshold)
-    model.fit(train_loader, epochs_per_layer=epochs_per_layer, lr=lr, device=device)
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"FF-MLP layers: {[input_dim] + list(hidden_dims) + [num_classes]}")
+    print(f"Threshold: {threshold}")
+    print(f"Parametri totali: {total_params:,}")
+    model.fit(train_loader, epochs_per_layer=epochs_per_layer, lr=lr, device=device, profiler=profiler)
 
     train_acc = accuracy(model, train_loader, device=device)
     test_acc = accuracy(model, test_loader, device=device)
     print(f"Train accuracy: {train_acc:.4f}  (error: {1 - train_acc:.4f})")
     print(f"Test  accuracy: {test_acc:.4f}  (error: {1 - test_acc:.4f})")
+
+    if profiler:
+        profiler.log_eval(train_acc, test_acc)
 
     # Salva checkpoint
     checkpoint_path = CHECKPOINT_DIR / args.model.checkpoint_name

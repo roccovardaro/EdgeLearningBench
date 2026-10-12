@@ -1,0 +1,12 @@
+# ── Configurazione Profiler Hardware (CPU, RAM, GPU, Energia) ─────────
+profiler:
+  enabled: true
+  interval_sec: 1.0     # Frequenza di campionamento delle metriche in secondi
+  track_energy: true     # Attiva il tracciamento dei consumi energetici (CodeCarbon)
+  export_csv: true       # Esporta la serie temporale dei campioni in results/
+  export_json: true      # Esporta energia e consumi in formato JSON in results/
+
+# ── Configurazione Profiler Train & Valutazione ───────────────────────
+train_eval_profiler:
+  enabled: true
+  export_csv: true       # Esporta i dati di train ed eval in results/

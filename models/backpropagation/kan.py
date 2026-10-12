@@ -7,10 +7,11 @@ basata su B-spline, addestrata con backpropagation standard.
 import math
 import torch
 import torch.nn as nn
-from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from efficient_kan import KAN
 
+from device import get_device
 from paths import CHECKPOINT_DIR
+from models.training_setup import get_training_components
 
 
 # ── Modello ──────────────────────────────────────────────────────────────────
@@ -103,8 +104,9 @@ def build_kan(input_dim, num_classes, hidden_dims=(64, 64),
 # ── Valutazione ──────────────────────────────────────────────────────────────
 
 @torch.no_grad()
-def accuracy(model, loader, device):
+def accuracy(model, loader, device=None):
     """Calcola l'accuratezza su un DataLoader."""
+    device = get_device(device)
     model.eval()
     correct, total = 0, 0
     for images, labels in loader:
@@ -117,7 +119,7 @@ def accuracy(model, loader, device):
 
 # ── Entry point (chiamato da main.py) ────────────────────────────────────────
 
-def kan_run(args, train_loader, test_loader):
+def kan_run(args, train_loader, test_loader, profiler=None, device=None):
     """Addestra e valuta un KAN con backpropagation standard."""
     # Parametri di training
     epochs = args.train.epochs
@@ -134,12 +136,7 @@ def kan_run(args, train_loader, test_loader):
     bottleneck_dim = getattr(args.model, "bottleneck_dim", 256)
     dropout = getattr(args.model, "dropout", 0.2)
 
-    device = torch.device(
-        "cuda" if torch.cuda.is_available()
-        else "mps" if torch.backends.mps.is_available()
-        else "cpu"
-    )
-    print(f"Device: {device}")
+    device = get_device(device)
 
     # Costruzione e spostamento su device
     model = build_kan(
@@ -152,28 +149,9 @@ def kan_run(args, train_loader, test_loader):
         dropout=dropout,
     ).to(device)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-
-    # ── Scheduler: warmup lineare + cosine annealing ────────────
-    warmup_epochs = min(5, epochs // 4) if epochs > 4 else 0
-    if warmup_epochs > 0:
-        warmup_scheduler = LinearLR(
-            optimizer, start_factor=0.1, end_factor=1.0,
-            total_iters=warmup_epochs,
-        )
-        cosine_scheduler = CosineAnnealingLR(
-            optimizer, T_max=epochs - warmup_epochs,
-        )
-        scheduler = SequentialLR(
-            optimizer,
-            schedulers=[warmup_scheduler, cosine_scheduler],
-            milestones=[warmup_epochs],
-        )
-    else:
-        scheduler = CosineAnnealingLR(optimizer, T_max=epochs)
-
-    # Label smoothing migliora la generalizzazione evitando che il modello diventi troppo "confident" sulle predizioni.
-    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
+    optimizer, scheduler, criterion = get_training_components(
+        model, args, model_type="kan"
+    )
 
     # ── Training ────────────────────────────────────────────────
     for epoch in range(epochs):
@@ -212,11 +190,17 @@ def kan_run(args, train_loader, test_loader):
             f"lr={optimizer.param_groups[0]['lr']:.6f}"
         )
 
+        if profiler:
+            profiler.log_epoch(epoch + 1, running_loss / total, correct / total, optimizer.param_groups[0]["lr"])
+
     # ── Valutazione ─────────────────────────────────────────────
     train_acc = accuracy(model, train_loader, device)
     test_acc = accuracy(model, test_loader, device)
     print(f"Train accuracy: {train_acc:.4f}  (error: {1 - train_acc:.4f})")
     print(f"Test  accuracy: {test_acc:.4f}  (error: {1 - test_acc:.4f})")
+
+    if profiler:
+        profiler.log_eval(train_acc, test_acc)
 
     # ── Checkpoint ──────────────────────────────────────────────
     checkpoint_path = CHECKPOINT_DIR / args.model.checkpoint_name
