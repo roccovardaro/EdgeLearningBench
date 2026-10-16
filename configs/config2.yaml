@@ -1,10 +1,11 @@
 dataset:
-  name: cifar10
+  name: fashion_mnist           # cifar10 | mnist | fashion_mnist
   augmentation: true      # Data augmentation (RandomCrop + RandomHorizontalFlip sul train set)
   normalize: true
 
+
 # Switch Paradigma: ff_resnet | ff_mlp | resnet | kan | mlp | cnn_kan | snn_mlp | snn_cnn | ltc | cnn_ltc
-paradigm: ltc
+paradigm: mlp
 
 # Dispositivo di calcolo: auto | cuda | cuda:0 | mps | cpu
 device: auto
@@ -21,7 +22,7 @@ device: auto
 # Funge da baseline di riferimento per tutti i modelli densi.
 mlp:
   model:
-    input_dim: 3072          # 3×32×32 per CIFAR-10
+    input_dim: 784          # 3×32×32 per CIFAR-10
     num_classes: 10
     hidden_dims: [512, 256]
     dropout: 0.2
