@@ -17,12 +17,14 @@ from torch.optim import Adam
 from torch.nn import functional as F
 from device import get_device
 from paths import CHECKPOINT_DIR
+from models.metrics import accuracy
 
 
 # ── Label overlay ────────────────────────────────────────────────────────────
 
 def overlay_y_on_x(x, y, num_classes):
-    """Appiattisce l'input e scrive la label nei primi *num_classes* pixel.
+    """
+    Appiattisce l'input e scrive la label nei primi *num_classes* pixel.
 
     x può avere forma [B, C, H, W], [B, H, W] o [B, D].
     Output: [B, D].
@@ -184,20 +186,6 @@ class FFNet(nn.Module):
         return torch.cat(goodness_per_label, dim=1).argmax(dim=1)
 
 
-
-# ── Accuracy ─────────────────────────────────────────────────────────────────
-
-@torch.no_grad()
-def accuracy(model, loader, device=None):
-    """Calcola l'accuratezza su un DataLoader."""
-    device = get_device(device)
-    model.eval()
-    correct, total = 0, 0
-    for images, labels in loader:
-        images, labels = images.to(device), labels.to(device)
-        correct += (model.predict(images) == labels).sum().item()
-        total += labels.shape[0]
-    return correct / total
 
 
 # ── Entry point (chiamato da main.py) ────────────────────────────────────────

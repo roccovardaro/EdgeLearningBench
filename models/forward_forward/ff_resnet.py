@@ -1,8 +1,6 @@
 """ResNet Forward-Forward.
 """
-
 from pathlib import Path
-
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -11,11 +9,26 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from paths import CHECKPOINT_DIR
 
 from device import get_device
+from models.metrics import accuracy
 
 
 
 def overlay_label_channels(images, labels, num_classes):
-    """Concatena K canali one-hot; accetta etichette [B] oppure un int."""
+    """
+        Aggiunge le informazioni delle etichette ai canali delle immagini mediante codifica one-hot.
+        Questa funzione converte le etichette in vettori one-hot e li espande per adattarli
+        alle dimensioni spaziali del tensore `images`. Il tensore restituito contiene le informazioni
+        delle etichette come canali aggiuntivi, arricchendo i dati di input per le attività
+        di apprendimento automatico che richiedono questa codifica.
+
+        :param images: Tensore 4D di forma `(batch, channels, height, width)` che rappresenta il batch di immagini di input.
+        :param labels: Tensore 1D o scalare contenente gli indici delle etichette corrispondenti a ciascuna immagine del batch.
+        :param num_classes: Intero che specifica il numero totale di classi per la codifica one-hot.
+
+        :return: Tensore 4D ottenuto concatenando il tensore delle immagini di input con i canali
+                 delle etichette codificate in formato one-hot. Il tensore risultante ha forma
+                 `(batch, channels + num_classes, height, width)`.
+    """
     batch, _, height, width = images.shape
     labels = torch.as_tensor(labels, device=images.device, dtype=torch.long)
     if labels.ndim == 0:
@@ -28,10 +41,22 @@ def overlay_label_channels(images, labels, num_classes):
 
 
 def make_negative_labels(labels, num_classes):
-    """Una classe errata uniforme per campione, mai la classe corretta."""
+    """
+    Genera un tensore di etichette negative applicando uno spostamento alle etichette fornite.
+
+    Questa funzione crea un nuovo insieme di etichette aggiungendo uno spostamento
+    generato casualmente e calcolando il risultato modulo il numero di classi specificato.
+    Garantisce che le etichette negative risultanti rimangano nell'intervallo valido
+    degli indici di classe.
+
+    :param labels: Tensore delle etichette di classe originali.
+    :param num_classes: Intero che rappresenta il numero totale di classi.
+    :return: Tensore di etichette negative in cui ogni etichetta viene calcolata usando
+        la formula `(labels + offset) % num_classes`.
+    """
     if num_classes < 2:
         raise ValueError("Servono almeno due classi")
-    offset = torch.randint(1, num_classes, labels.shape, device=labels.device)
+    offset = torch.randint(1, num_classes, labels.shape, device=labels.device) #num_classes escluso
     return (labels + offset) % num_classes
 
 
@@ -50,7 +75,7 @@ class SampleRMSNorm(nn.Module):
 
 
 class FFResidualBlock(nn.Module):
-    """BasicBlock residuo autonomo, senza dipendenze dal resto del progetto."""
+    """BasicBlock residuo autonomo."""
 
     def __init__(self, in_channels, out_channels, stride=1):
         super().__init__()
@@ -144,24 +169,30 @@ class FFResNet(nn.Module):
     @torch.no_grad()
     def score(self, images, label):
         """Goodness cumulativa escludendo il primo layer (label-dominated)."""
+        was_training = self.training
         self.eval()
-        features = images
-        total = torch.zeros(images.shape[0], device=images.device)
-        for idx, block in enumerate(self.blocks):
-            features = block(features, label)
-            if idx == 0:
-                continue  # Il blocco 1 riflette la separazione triviale della label
-            total += block.goodness(features)
-        self.train()
-        return total
+        try:
+            features = images
+            total = torch.zeros(images.shape[0], device=images.device)
+            for idx, block in enumerate(self.blocks):
+                features = block(features, label)
+                if idx == 0:
+                    continue  # Il blocco 1 riflette la separazione triviale della label
+                total += block.goodness(features)
+            return total
+        finally:
+            self.train(was_training)
 
     @torch.no_grad()
     def predict(self, images):
+        was_training = self.training
         self.eval()
-        scores = self._candidate_goodness(images, len(self.blocks))
-        self.train()
-        # Esclude il primo layer (indice 0) dalla somma della goodness
-        return scores[:, :, 1:].sum(dim=2).argmax(dim=1)
+        try:
+            scores = self._candidate_goodness(images, len(self.blocks))
+            # Esclude il primo layer (indice 0) dalla somma della goodness
+            return scores[:, :, 1:].sum(dim=2).argmax(dim=1)
+        finally:
+            self.train(was_training)
 
 
 
@@ -190,7 +221,7 @@ class FFResNet(nn.Module):
 
                     neg_labels = make_negative_labels(labels, self.num_classes)
                     paired_labels = torch.cat((labels, neg_labels), dim=0)
-                    features = torch.cat((images, images), dim=0)
+                    features = torch.cat((images, images), dim=0) # Le immagini vengono duplicate per creare coppie di positivi e negativi.
                     with torch.no_grad():
                         for prev in self.blocks[:block_idx]:
                             # Sono congelati e in eval: running stats invarianti.
@@ -244,21 +275,6 @@ class FFResNet(nn.Module):
         self.eval()
         return self
 
-
-@torch.no_grad()
-def accuracy(model, loader, device=None):
-    device = get_device(device)
-    correct = total = 0
-    model.eval()
-    for images, labels in loader:
-        images = images.to(device)
-        labels = labels.to(device=device, dtype=torch.long)
-        correct += (model.predict(images) == labels).sum().item()
-        total += labels.shape[0]
-    model.train()
-    if total == 0:
-        raise ValueError("Il loader di valutazione e' vuoto")
-    return correct / total
 
 
 def ff_resnet_run(args, train_loader, test_loader, profiler=None, device=None):

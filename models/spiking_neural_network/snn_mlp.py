@@ -11,6 +11,7 @@ from snntorch import surrogate
 from device import get_device
 from paths import CHECKPOINT_DIR, RESULTS_DIR
 from profiler.snn_profiler import SNNProfiler
+from models.metrics import accuracy
 from models.training_setup import get_training_components
 
 
@@ -96,7 +97,7 @@ class SpikingMLP(nn.Module):
             # Propagazione attraverso i layer nascosti
             cur = inp
             for i, (linear, bn, lif, drop) in enumerate(zip(self.layers, self.bns, self.lif_neurons, self.dropouts)):
-                cur = linear(cur)
+                cur = linear(cur) #Dopo Linear otteniamo valori reali
                 cur = bn(cur)
                 spk, mem_list[i] = lif(cur, mem_list[i])
                 cur = drop(spk)
@@ -139,28 +140,6 @@ def build_snn_mlp(
 
 # SNNLoss è importata da training_setup
 
-
-# ── Valutazione ──────────────────────────────────────────────────────────────
-
-@torch.no_grad()
-def accuracy(model, loader, device=None):
-    """Calcola l'accuratezza su un DataLoader.
-
-    La predizione è basata sul potenziale di membrana medio dell'ultimo layer
-    (media su tutti i timestep).
-    """
-    device = get_device(device)
-    model.eval()
-    correct, total = 0, 0
-    for images, labels in loader:
-        images, labels = images.to(device), labels.to(device)
-        spk_out, mem_out = model(images)
-        # Predizione basata sulla membrana media
-        mem_avg = mem_out.mean(dim=0)
-        preds = mem_avg.argmax(dim=1)
-        correct += (preds == labels).sum().item()
-        total += labels.size(0)
-    return correct / total
 
 
 # ── Entry point (chiamato da main.py) ────────────────────────────────────────

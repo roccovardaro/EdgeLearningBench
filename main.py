@@ -4,7 +4,6 @@ from datasets.dataset import get_dataloaders
 from device import get_device
 from paths import RESULTS_DIR
 from profiler import EdgeProfiler, TrainEvalProfiler
-
 from models.forward_forward.ff_mlp import ff_mlp_run
 from models.forward_forward.ff_resnet import ff_resnet_run
 from models.backpropagation.resnet import resnet_run

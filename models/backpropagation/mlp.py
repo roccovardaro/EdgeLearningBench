@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 from device import get_device
 from paths import CHECKPOINT_DIR
+from models.metrics import accuracy
 from models.training_setup import get_training_components
 
 
@@ -57,21 +58,6 @@ def build_mlp(input_dim, num_classes, hidden_dims=(512, 256), dropout=0.2):
     print(f"Parametri totali: {total_params:,}")
     return model
 
-
-# ── Valutazione ──────────────────────────────────────────────────────────────
-
-@torch.no_grad()
-def accuracy(model, loader, device=None):
-    """Calcola l'accuratezza su un DataLoader."""
-    device = get_device(device)
-    model.eval()
-    correct, total = 0, 0
-    for images, labels in loader:
-        images, labels = images.to(device), labels.to(device)
-        preds = model(images).argmax(dim=1)
-        correct += (preds == labels).sum().item()
-        total += labels.size(0)
-    return correct / total
 
 
 # ── Entry point (chiamato da main.py) ────────────────────────────────────────

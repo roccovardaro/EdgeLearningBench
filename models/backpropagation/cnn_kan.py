@@ -7,6 +7,7 @@ from efficient_kan import KAN
 
 from device import get_device
 from paths import CHECKPOINT_DIR
+from models.metrics import accuracy
 from models.training_setup import get_training_components
 
 
@@ -105,22 +106,6 @@ def build_cnn_kan(in_channels=3, num_classes=10,
     print(f"Grid size: {grid_size}, Spline order: {spline_order}")
     print(f"Parametri — CNN: {cnn_params:,}  KAN: {kan_params:,}  Totale: {total_params:,}")
     return model
-
-
-# ── Valutazione ──────────────────────────────────────────────────────────────
-
-@torch.no_grad()
-def accuracy(model, loader, device=None):
-    """Calcola l'accuratezza su un DataLoader."""
-    device = get_device(device)
-    model.eval()
-    correct, total = 0, 0
-    for images, labels in loader:
-        images, labels = images.to(device), labels.to(device)
-        preds = model(images).argmax(dim=1)
-        correct += (preds == labels).sum().item()
-        total += labels.size(0)
-    return correct / total
 
 
 # ── Entry point (chiamato da main.py) ────────────────────────────────────────

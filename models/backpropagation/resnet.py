@@ -4,6 +4,7 @@ from typing import Any, List, Optional
 
 from device import get_device
 from paths import CHECKPOINT_DIR
+from models.metrics import accuracy
 from models.training_setup import get_training_components
 
 def conv3x3(in_planes, out_planes, stride=1):
@@ -153,28 +154,13 @@ def resnet56(
     weights_path=None,
 ):
     return _resnet(
-        arch="resnet56",
-        layers=[9, 9, 9],
+        arch="resnet",
+        layers=[4, 4, 4],
         num_classes=num_classes,
         in_channels=in_channels,
         weights_path=weights_path,
     )
 
-
-# ── Valutazione ──────────────────────────────────────────────────────────────
-
-@torch.no_grad()
-def accuracy(model, loader, device=None):
-    """Calcola l'accuratezza su un DataLoader."""
-    device = get_device(device)
-    model.eval()
-    correct, total = 0, 0
-    for images, labels in loader:
-        images, labels = images.to(device), labels.to(device)
-        preds = model(images).argmax(dim=1)
-        correct += (preds == labels).sum().item()
-        total += labels.size(0)
-    return correct / total
 
 
 # ── Entry point (chiamato da main.py) ────────────────────────────────────────

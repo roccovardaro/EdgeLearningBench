@@ -4,7 +4,7 @@ dataset:
   normalize: true
 
 # Switch Paradigma: ff_resnet | ff_mlp | resnet | kan | mlp | cnn_kan | snn_mlp | snn_cnn | ltc | cnn_ltc
-paradigm: kan
+paradigm: ltc
 
 # Dispositivo di calcolo: auto | cuda | cuda:0 | mps | cpu
 device: auto
@@ -65,16 +65,16 @@ kan:
     grid_size: 5             # Risoluzione B-spline bilanciata per stabilità e velocità
     spline_order: 3          # B-spline cubica standard
     bottleneck_dim: 384      # Proiezione per pareggiare la capacità a ~1.76M
-    dropout: 0.1
+    dropout: 0.2
     checkpoint_name: kan.pt
   train:
-    epochs: 50               # Epoche di addestramento con CosineAnnealingLR
-    lr: 0.002
-    batch_size: 64
+    epochs: 30               # Epoche di addestramento con CosineAnnealingLR
+    lr: 0.003
+    batch_size: 128
     weight_decay: 0.0001
     regularization_lambda: 0.005
   eval:
-    batch_size: 64
+    batch_size: 128
 
 
 # ── SNN-MLP (Spiking Neural Network – Rate Coding) ───────────
@@ -90,7 +90,7 @@ snn_mlp:
     dropout: 0.2
     checkpoint_name: snn_mlp.pt
   train:
-    epochs: 20
+    epochs: 30
     lr: 0.002
     batch_size: 128
     weight_decay: 0.0001
@@ -113,7 +113,7 @@ ltc:
     dropout: 0.2
     checkpoint_name: ltc.pt
   train:
-    epochs: 20
+    epochs: 30
     lr: 0.001
     batch_size: 64
     weight_decay: 0.0001
@@ -141,7 +141,7 @@ cnn_kan:
     spline_order: 3
     checkpoint_name: cnn_kan.pt
   train:
-    epochs: 20
+    epochs: 30
     lr: 0.005
     batch_size: 64
     weight_decay: 0.0005
@@ -179,13 +179,13 @@ snn_cnn:
   model:
     in_channels: 3           # 3 canali RGB
     num_classes: 10
-    cnn_channels: [32, 64, 128] # [32, 64, 128] per backbone identico (oppure [48, 96, 160] per ~181k params)
+    cnn_channels: [48, 96, 160] # [32, 64, 128] per backbone identico (oppure [48, 96, 160] per ~181k params)
     beta: 0.95               # Decadimento LIF
     num_steps: 5             # Timestep di simulazione spiking
     dropout: 0.2
     checkpoint_name: snn_cnn.pt
   train:
-    epochs: 20
+    epochs: 30
     lr: 0.002
     batch_size: 64
     weight_decay: 0.0001
@@ -207,7 +207,7 @@ resnet:
     num_classes: 10
     checkpoint_name: resnet.pt
   train:
-    epochs: 20
+    epochs: 30
     lr: 0.001
     batch_size: 128
     weight_decay: 0.0001

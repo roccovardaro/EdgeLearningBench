@@ -11,6 +11,7 @@ from efficient_kan import KAN
 
 from device import get_device
 from paths import CHECKPOINT_DIR
+from models.metrics import accuracy
 from models.training_setup import get_training_components
 
 
@@ -32,14 +33,18 @@ class KANClassifier(nn.Module):
         self.bottleneck_dim = bottleneck_dim
 
         # ── Pre-processing ──────────────────────────────────────
-        # LayerNorm normalizza i pixel grezzi nell'intervallo ≈ [-1, 1],
-        # che è il grid_range di default delle B-spline di efficient-kan.
+        # LayerNorm normalizza i pixel grezzi
         self.input_norm = nn.LayerNorm(input_dim)
 
-        # Proiezione lineare: riduce 3072 → bottleneck_dim in modo
+        # Proiezione lineare: riduce input_dim → bottleneck_dim in modo
         # economico (parametri lineari), così i layer KAN lavorano
         # su uno spazio compatto.
         self.projection = nn.Linear(input_dim, bottleneck_dim)
+
+        # LayerNorm sul bottleneck: assicura che le attivazioni in ingresso
+        # al primo layer KAN siano centrate e scalate nell'intervallo ≈ [-1, 1],
+        # che è il grid_range ideale delle B-spline di efficient-kan.
+        self.proj_norm = nn.LayerNorm(bottleneck_dim)
 
         # ── KAN layers ──────────────────────────────────────────
         layers_hidden = [bottleneck_dim] + self.hidden_dims + [num_classes]
@@ -49,9 +54,10 @@ class KANClassifier(nn.Module):
             spline_order=spline_order,
         )
 
-        # ── Dropout tra i layer KAN ─────────────────────────────
-        # Viene applicato sull'output della proiezione e tra i layer
-        # interni del KAN (vedi forward).
+        # ── Normalizzazione e Dropout tra i layer KAN ───────────
+        # LayerNorm previene la deriva di scala tra layer KAN consecutivi,
+        # mantenendo le attivazioni nel dominio di supporto delle spline.
+        self.hidden_norms = nn.ModuleList([nn.LayerNorm(h) for h in self.hidden_dims])
         self.dropout = nn.Dropout(p=dropout)
 
         # Inizializzazione Kaiming per la proiezione lineare
@@ -60,11 +66,31 @@ class KANClassifier(nn.Module):
 
     def forward(self, x):
         """Forward pass con flatten automatico [B, C, H, W] → [B, D]."""
+
         x = x.flatten(1)
         x = self.input_norm(x)
         x = self.projection(x)
+        x = self.proj_norm(x)
         x = self.dropout(x)
-        return self.kan(x)
+
+        # Passaggio sequenziale attraverso i layer KAN:
+        # Per i soli layer nascosti (escluso l'output finale) applica:
+        # 1. Skip connection (se le dimensioni coincidono) per facilitare i gradienti.
+        # 2. LayerNorm per mantenere i valori nel range [-1, 1] attivo delle B-spline.
+        # 3. Dropout per ridurre l'overfitting.
+
+        for i, layer in enumerate(self.kan.layers):
+            res = x
+            x = layer(x)
+            # Applica residual (se dimensioni compatibili), norm e dropout
+            # solo sui layer intermedi (non sull'output logits finale)
+            if i < len(self.kan.layers) - 1:
+                if x.shape == res.shape:
+                    x = x + res
+                x = self.hidden_norms[i](x)
+                x = self.dropout(x)
+
+        return x
 
     def regularization_loss(self):
         """Proxy per la regularizzazione L1 sugli spline weights di efficient-kan."""
@@ -90,7 +116,11 @@ def build_kan(input_dim, num_classes, hidden_dims=(64, 64),
     # Stampa il breakdown dei parametri
     proj_params = sum(p.numel() for p in model.projection.parameters())
     kan_params = sum(p.numel() for p in model.kan.parameters())
-    norm_params = sum(p.numel() for p in model.input_norm.parameters())
+    norm_params = (
+        sum(p.numel() for p in model.input_norm.parameters())
+        + sum(p.numel() for p in model.proj_norm.parameters())
+        + sum(p.numel() for p in model.hidden_norms.parameters())
+    )
     total_params = sum(p.numel() for p in model.parameters())
 
     print(f"KAN layers: {[bottleneck_dim] + list(hidden_dims) + [num_classes]}")
@@ -101,21 +131,6 @@ def build_kan(input_dim, num_classes, hidden_dims=(64, 64),
     return model
 
 
-# ── Valutazione ──────────────────────────────────────────────────────────────
-
-@torch.no_grad()
-def accuracy(model, loader, device=None):
-    """Calcola l'accuratezza su un DataLoader."""
-    device = get_device(device)
-    model.eval()
-    correct, total = 0, 0
-    for images, labels in loader:
-        images, labels = images.to(device), labels.to(device)
-        preds = model(images).argmax(dim=1)
-        correct += (preds == labels).sum().item()
-        total += labels.size(0)
-    return correct / total
-
 
 # ── Entry point (chiamato da main.py) ────────────────────────────────────────
 
@@ -125,7 +140,7 @@ def kan_run(args, train_loader, test_loader, profiler=None, device=None):
     epochs = args.train.epochs
     lr = args.train.lr
     weight_decay = getattr(args.train, "weight_decay", 1e-4)
-    reg_lambda = getattr(args.train, "regularization_lambda", 0.01)
+    reg_lambda = getattr(args.train, "regularization_lambda", 0.0)
 
     # Parametri del modello
     input_dim = args.model.input_dim
@@ -187,11 +202,11 @@ def kan_run(args, train_loader, test_loader, profiler=None, device=None):
             f"Epoch {epoch + 1:3d}/{epochs} | "
             f"loss={running_loss / total:.4f} | "
             f"train_acc={correct / total:.4f} | "
-            f"lr={optimizer.param_groups[0]['lr']:.6f}"
+            f"lr={scheduler.get_last_lr()[0]:.6f}"
         )
 
         if profiler:
-            profiler.log_epoch(epoch + 1, running_loss / total, correct / total, optimizer.param_groups[0]["lr"])
+            profiler.log_epoch(epoch + 1, running_loss / total, correct / total, scheduler.get_last_lr()[0])
 
     # ── Valutazione ─────────────────────────────────────────────
     train_acc = accuracy(model, train_loader, device)
