@@ -69,7 +69,7 @@ kan:
     dropout: 0.2
     checkpoint_name: kan.pt
   train:
-    epochs: 30               # Epoche di addestramento con CosineAnnealingLR
+    epochs: 30               # Epoche di addestramento
     lr: 0.003
     batch_size: 128
     weight_decay: 0.0001

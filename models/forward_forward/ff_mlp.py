@@ -145,8 +145,7 @@ class FFNet(nn.Module):
                 print(
                     f"Epoch {epoch + 1:3d}/{epochs_per_layer} | "
                     f"loss={total_loss / total:.4f} | "
-                    f"train_acc={correct / total:.4f} | "
-                    f"lr={optimizer.param_groups[0]['lr']:.6f}"
+                    f"train_acc={correct / total:.4f}"
                 )
 
                 if profiler:
@@ -155,7 +154,6 @@ class FFNet(nn.Module):
                         loss=total_loss / total,
                         acc=correct / total,
                         layer=layer_idx + 1,
-                        lr=optimizer.param_groups[0]["lr"],
                     )
 
             # Layer completato: congela

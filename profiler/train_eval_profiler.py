@@ -24,7 +24,6 @@ class TrainEvalProfiler:
         epoch: int,
         loss: float,
         acc: Optional[float] = None,
-        *args: Any,
         time_sec: Optional[float] = None,
         **kwargs: Any,
     ) -> None:

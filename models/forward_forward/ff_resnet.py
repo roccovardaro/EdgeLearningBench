@@ -5,7 +5,6 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.optim import Adam
-from torch.optim.lr_scheduler import CosineAnnealingLR
 from paths import CHECKPOINT_DIR
 
 from device import get_device
@@ -209,7 +208,6 @@ class FFResNet(nn.Module):
             block.requires_grad_(True)
             block.train()
             optimizer = Adam(block.parameters(), lr=lr)
-            scheduler = CosineAnnealingLR(optimizer, T_max=epochs_per_layer)
 
             for epoch in range(epochs_per_layer):
                 total_loss = total_pos = total_neg = total_pairs = 0.0
@@ -250,8 +248,6 @@ class FFResNet(nn.Module):
                 if total_samples == 0:
                     raise ValueError("train_loader e' vuoto")
 
-                scheduler.step()
-
                 record = {
                     "block": block_idx + 1,
                     "epoch": epoch + 1,
@@ -264,8 +260,7 @@ class FFResNet(nn.Module):
                 print(
                     f"Epoch {epoch + 1:3d}/{epochs_per_layer} | "
                     f"loss={total_loss / total_samples:.4f} | "
-                    f"train_acc={total_pairs / total_samples:.4f} | "
-                    f"lr={scheduler.get_last_lr()[0]:.6f}"
+                    f"train_acc={total_pairs / total_samples:.4f}"
                 )
 
             block.eval()

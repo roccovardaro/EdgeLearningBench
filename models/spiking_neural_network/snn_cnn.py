@@ -192,7 +192,6 @@ def build_snn_cnn(
 def snn_cnn_run(args, train_loader, test_loader, profiler=None, device=None):
     """Addestra e valuta un SNN-CNN con rate coding e backpropagation surrogata."""
     epochs = args.train.epochs
-    lr = args.train.lr
     weight_decay = getattr(args.train, "weight_decay", 1e-4)
 
     in_channels = args.model.in_channels
@@ -216,7 +215,7 @@ def snn_cnn_run(args, train_loader, test_loader, profiler=None, device=None):
         dropout=dropout,
     ).to(device)
 
-    optimizer, scheduler, criterion = get_training_components(
+    optimizer, criterion = get_training_components(
         model, args, model_type="snn_cnn"
     )
     snn_profiler = SNNProfiler(tag="snn_cnn", output_dir=RESULTS_DIR)
@@ -238,22 +237,21 @@ def snn_cnn_run(args, train_loader, test_loader, profiler=None, device=None):
             optimizer.step()
 
             running_loss += loss.item() * labels.size(0)
+            
+            #valutazione accuratezza
             mem_avg = mem_out.mean(dim=0).detach()
             correct += (mem_avg.argmax(1) == labels).sum().item()
             total += labels.size(0)
             snn_profiler.update(spk_out)
 
-        scheduler.step()
-
         print(
             f"Epoch {epoch + 1:3d}/{epochs} | "
             f"loss={running_loss / total:.4f} | "
-            f"train_acc={correct / total:.4f} | "
-            f"lr={scheduler.get_last_lr()[0]:.6f}"
+            f"train_acc={correct / total:.4f}"
         )
 
         if profiler:
-            profiler.log_epoch(epoch + 1, running_loss / total, correct / total, scheduler.get_last_lr()[0])
+            profiler.log_epoch(epoch + 1, running_loss / total, correct / total)
         snn_profiler.log_epoch(epoch + 1)
 
     # ── Valutazione ─────────────────────────────────────────────

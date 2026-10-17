@@ -1,8 +1,7 @@
-"""Modulo per la configurazione centralizzata di optimizer, scheduler e criterion."""
+"""Modulo per la configurazione centralizzata di optimizer e criterion."""
 
 import torch
 import torch.nn as nn
-from torch.optim.lr_scheduler import CosineAnnealingLR
 
 
 # ── Loss per Spiking Neural Networks ──────────────────────────────────────────
@@ -28,7 +27,7 @@ SNNCNNLoss = SNNLoss
 # ── Builder Unificato ────────────────────────────────────────────────────────
 
 def get_training_components(model, args, model_type="default"):
-    """Restituisce (optimizer, scheduler, criterion) per il modello specificato.
+    """Restituisce (optimizer, criterion) per il modello specificato.
 
     Args:
         model: Il modello PyTorch (nn.Module).
@@ -37,17 +36,13 @@ def get_training_components(model, args, model_type="default"):
                     'ltc', 'cnn_ltc', 'snn_mlp', 'snn_cnn').
     """
     train = getattr(args, "train", args)
-    epochs = train.epochs
     lr = train.lr
     weight_decay = getattr(train, "weight_decay", 1e-4)
 
-    # 1. Optimizer: AdamW comune a tutti i modelli
+    # 1. Optimizer: AdamW comune a tutti i modelli (learning rate fisso)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
-    # 2. Scheduler: Cosine Annealing comune a tutti i modelli
-    scheduler = CosineAnnealingLR(optimizer, T_max=epochs)
-
-    # 3. Criterion: CrossEntropy (con label smoothing se previsto) o SNNLoss
+    # 2. Criterion: CrossEntropy (con label smoothing se previsto) o SNNLoss
     m_type = model_type.lower()
     if m_type in ("snn_mlp", "snn_cnn", "snn"):
         mem_weight = getattr(train, "mem_weight", 1.0)
@@ -58,4 +53,4 @@ def get_training_components(model, args, model_type="default"):
     else:
         criterion = nn.CrossEntropyLoss()
 
-    return optimizer, scheduler, criterion
+    return optimizer, criterion

@@ -161,14 +161,11 @@ def resnet56(
         weights_path=weights_path,
     )
 
-
-
 # ── Entry point (chiamato da main.py) ────────────────────────────────────────
 
 def resnet_run(args, train_loader, test_loader, profiler=None, device=None):
     """Addestra e valuta una ResNet con backpropagation standard."""
     epochs = args.train.epochs
-    lr = args.train.lr
     in_channels = args.model.in_channels
     num_classes = args.model.num_classes
 
@@ -179,7 +176,7 @@ def resnet_run(args, train_loader, test_loader, profiler=None, device=None):
     print(f"ResNet layers: [9, 9, 9] (ResNet-56) | in_channels={in_channels} | classes={num_classes}")
     print(f"Parametri totali: {total_params:,}")
 
-    optimizer, scheduler, criterion = get_training_components(
+    optimizer, criterion = get_training_components(
         model, args, model_type="resnet"
     )
 
@@ -201,17 +198,14 @@ def resnet_run(args, train_loader, test_loader, profiler=None, device=None):
             correct += (outputs.argmax(1) == labels).sum().item()
             total += labels.size(0)
 
-        scheduler.step()
-
         print(
             f"Epoch {epoch + 1:3d}/{epochs} | "
             f"loss={running_loss / total:.4f} | "
-            f"train_acc={correct / total:.4f} | "
-            f"lr={scheduler.get_last_lr()[0]:.6f}"
+            f"train_acc={correct / total:.4f}"
         )
 
         if profiler:
-            profiler.log_epoch(epoch + 1, running_loss / total, correct / total, scheduler.get_last_lr()[0])
+            profiler.log_epoch(epoch + 1, running_loss / total, correct / total)
 
     # ── Valutazione ─────────────────────────────────────────────
     train_acc = accuracy(model, train_loader, device)

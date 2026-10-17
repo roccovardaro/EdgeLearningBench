@@ -138,7 +138,6 @@ def kan_run(args, train_loader, test_loader, profiler=None, device=None):
     """Addestra e valuta un KAN con backpropagation standard."""
     # Parametri di training
     epochs = args.train.epochs
-    lr = args.train.lr
     weight_decay = getattr(args.train, "weight_decay", 1e-4)
     reg_lambda = getattr(args.train, "regularization_lambda", 0.0)
 
@@ -164,7 +163,7 @@ def kan_run(args, train_loader, test_loader, profiler=None, device=None):
         dropout=dropout,
     ).to(device)
 
-    optimizer, scheduler, criterion = get_training_components(
+    optimizer, criterion = get_training_components(
         model, args, model_type="kan"
     )
 
@@ -196,17 +195,14 @@ def kan_run(args, train_loader, test_loader, profiler=None, device=None):
             correct += (outputs.argmax(1) == labels).sum().item()
             total += labels.size(0)
 
-        scheduler.step()
-
         print(
             f"Epoch {epoch + 1:3d}/{epochs} | "
             f"loss={running_loss / total:.4f} | "
-            f"train_acc={correct / total:.4f} | "
-            f"lr={scheduler.get_last_lr()[0]:.6f}"
+            f"train_acc={correct / total:.4f}"
         )
 
         if profiler:
-            profiler.log_epoch(epoch + 1, running_loss / total, correct / total, scheduler.get_last_lr()[0])
+            profiler.log_epoch(epoch + 1, running_loss / total, correct / total)
 
     # ── Valutazione ─────────────────────────────────────────────
     train_acc = accuracy(model, train_loader, device)
