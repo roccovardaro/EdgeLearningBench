@@ -2,7 +2,7 @@
 
 Implementazione dell'algoritmo Forward-Forward (Hinton, 2022) su un MLP
 fully-connected.  Ogni layer viene addestrato in modo greedy senza
-backpropagation end-to-end.
+kan end-to-end.
 
 Caratteristiche:
 - Label overlay nei primi pixel dell'input appiattito.

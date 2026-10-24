@@ -7,32 +7,20 @@ from paths import CHECKPOINT_DIR
 from models.metrics import accuracy
 from models.training_setup import get_training_components
 
-def conv3x3(in_planes, out_planes, stride=1):
-    """3x3 convolution with padding"""
-    return nn.Conv2d(
-        in_planes, out_planes,
-        kernel_size=3, stride=stride, padding=1, bias=False
-    )
-
-
-def conv1x1(in_planes, out_planes, stride=1):
-    """1x1 convolution"""
-    return nn.Conv2d(
-        in_planes, out_planes,
-        kernel_size=1, stride=stride, bias=False
-    )
-
-
 class BasicBlock(nn.Module):
     expansion = 1
 
     def __init__(self, inplanes, planes, stride=1, downsample=None):
         super(BasicBlock, self).__init__()
-        self.conv1 = conv3x3(inplanes, planes, stride)
+        
+        self.conv1 = nn.Conv2d(inplanes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(planes)
-        self.relu = nn.ReLU(inplace=True)
-        self.conv2 = conv3x3(planes, planes)
+        self.relu1 = nn.ReLU(inplace=False)
+
+        self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(planes)
+        self.relu2 = nn.ReLU(inplace=False)
+        
         self.downsample = downsample
         self.stride = stride
 
@@ -41,7 +29,7 @@ class BasicBlock(nn.Module):
 
         out = self.conv1(x)
         out = self.bn1(out)
-        out = self.relu(out)
+        out = self.relu1(out)
 
         out = self.conv2(out)
         out = self.bn2(out)
@@ -50,7 +38,7 @@ class BasicBlock(nn.Module):
             identity = self.downsample(x)
 
         out += identity
-        out = self.relu(out)
+        out = self.relu2(out)
 
         return out
 
@@ -62,9 +50,11 @@ class ResNet(nn.Module):
         self.inplanes = 16
 
         #CONVOLUZIONE INZIALE
-        self.conv1 = conv3x3(in_channels, 16)
+        self.conv1 = nn.Conv2d(
+            in_channels, 16, kernel_size=3, stride=1, padding=1, bias=False
+        )
         self.bn1 = nn.BatchNorm2d(16)
-        self.relu = nn.ReLU(inplace=True)
+        self.relu = nn.ReLU(inplace=False)
 
         self.layer1 = self._make_layer(block, 16, layers[0])
         self.layer2 = self._make_layer(block, 32, layers[1], stride=2)
@@ -86,7 +76,10 @@ class ResNet(nn.Module):
         downsample = None
         if stride != 1 or self.inplanes != planes * block.expansion:
             downsample = nn.Sequential(
-                conv1x1(self.inplanes, planes * block.expansion, stride),
+                nn.Conv2d(
+                    self.inplanes, planes * block.expansion,
+                    kernel_size=1, stride=stride, bias=False
+                ),
                 nn.BatchNorm2d(planes * block.expansion),
             )
 
@@ -148,32 +141,47 @@ def _resnet(
 
     return model
 
-def resnet56(
-    num_classes,
-    in_channels=3,
-    weights_path=None,
-):
+def resnet(
+    num_classes: int,
+    in_channels: int = 3,
+    layers: Optional[List[int]] = None,
+    weights_path: Optional[str] = None,
+    **kwargs: Any
+) -> ResNet:
+    if layers is None:
+        layers = [9, 9, 9]
+    depth = sum(layers) * 2 + 2
     return _resnet(
-        arch="resnet",
-        layers=[4, 4, 4],
+        arch=f"ResNet-{depth}",
+        layers=layers,
         num_classes=num_classes,
         in_channels=in_channels,
         weights_path=weights_path,
+        **kwargs,
     )
+
 
 # ── Entry point (chiamato da main.py) ────────────────────────────────────────
 
 def resnet_run(args, train_loader, test_loader, profiler=None, device=None):
-    """Addestra e valuta una ResNet con backpropagation standard."""
+    """Addestra e valuta una ResNet."""
     epochs = args.train.epochs
     in_channels = args.model.in_channels
     num_classes = args.model.num_classes
+    layers = list(getattr(args.model, "layers", [9, 9, 9]))
+    depth = sum(layers) * 2 + 2
+    model_name = f"ResNet-{depth}"
 
     device = get_device(device)
 
-    model = resnet56(num_classes=num_classes, in_channels=in_channels).to(device)
+    model = resnet(
+        num_classes=num_classes,
+        in_channels=in_channels,
+        layers=layers,
+        weights_path=getattr(args.model, "weights_path", None),
+    ).to(device)
     total_params = sum(p.numel() for p in model.parameters())
-    print(f"ResNet layers: [9, 9, 9] (ResNet-56) | in_channels={in_channels} | classes={num_classes}")
+    print(f"ResNet layers: {layers} ({model_name}) | in_channels={in_channels} | classes={num_classes}")
     print(f"Parametri totali: {total_params:,}")
 
     optimizer, criterion = get_training_components(
@@ -223,6 +231,7 @@ def resnet_run(args, train_loader, test_loader, profiler=None, device=None):
         "model_config": {
             "in_channels": in_channels,
             "num_classes": num_classes,
+            "layers": layers,
         },
     }, checkpoint_path)
     print(f"Checkpoint salvato in: {checkpoint_path}")

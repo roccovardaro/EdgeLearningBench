@@ -190,7 +190,7 @@ def build_snn_cnn(
 # ── Entry point (chiamato da main.py) ────────────────────────────────────────
 
 def snn_cnn_run(args, train_loader, test_loader, profiler=None, device=None):
-    """Addestra e valuta un SNN-CNN con rate coding e backpropagation surrogata."""
+    """Addestra e valuta un SNN-CNN con rate coding e kan surrogata."""
     epochs = args.train.epochs
     weight_decay = getattr(args.train, "weight_decay", 1e-4)
 
@@ -218,7 +218,7 @@ def snn_cnn_run(args, train_loader, test_loader, profiler=None, device=None):
     optimizer, criterion = get_training_components(
         model, args, model_type="snn_cnn"
     )
-    snn_profiler = SNNProfiler(tag="snn_cnn", output_dir=RESULTS_DIR)
+    snn_profiler = SNNProfiler(model=model, tag="snn_cnn", output_dir=RESULTS_DIR)
 
     # ── Training ────────────────────────────────────────────────
     for epoch in range(epochs):
@@ -256,7 +256,11 @@ def snn_cnn_run(args, train_loader, test_loader, profiler=None, device=None):
 
     # ── Valutazione ─────────────────────────────────────────────
     train_acc = accuracy(model, train_loader, device)
+
+    snn_profiler.reset()
     test_acc = accuracy(model, test_loader, device)
+    snn_profiler.log_epoch("test", tag="test")
+
     print(f"Train accuracy: {train_acc:.4f}  (error: {1 - train_acc:.4f})")
     print(f"Test  accuracy: {test_acc:.4f}  (error: {1 - test_acc:.4f})")
 

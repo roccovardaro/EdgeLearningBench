@@ -1,6 +1,6 @@
 from datasets.cifar10 import cifar10_dataloaders
-from datasets.fashion_mnist import fashion_mnist_loaders
-from datasets.mnist import mnist_loaders
+from datasets.fashion_mnist import fashion_mnist_dataloaders
+from datasets.mnist import mnist_dataloaders
 
 
 def get_dataloaders(args):
@@ -14,7 +14,12 @@ def get_dataloaders(args):
     dataset_name = getattr(args.dataset, "name", "").lower().replace("-", "_")
 
     if dataset_name == "mnist":
-        return mnist_loaders(train_batch_size=train_bs, test_batch_size=eval_bs)
+        return mnist_dataloaders(
+            train_batch_size=train_bs,
+            test_batch_size=eval_bs,
+            augment=augment,
+            normalize=normalize,
+        )
     if dataset_name == "cifar10":
         return cifar10_dataloaders(
             train_batch_size=train_bs,
@@ -23,7 +28,7 @@ def get_dataloaders(args):
             normalize=normalize,
         )
     if dataset_name in ("fashion_mnist", "fashionmnist"):
-        return fashion_mnist_loaders(
+        return fashion_mnist_dataloaders(
             train_batch_size=train_bs,
             test_batch_size=eval_bs,
             augment=augment,

@@ -33,14 +33,15 @@ def get_training_components(model, args, model_type="default"):
         model: Il modello PyTorch (nn.Module).
         args: Namespace degli argomenti (args del paradigma o args.train).
         model_type: Nome del modello ('resnet', 'mlp', 'kan', 'cnn_kan',
-                    'ltc', 'cnn_ltc', 'snn_mlp', 'snn_cnn').
+                    'ltc', 'cnn_ltc', 'snn_mlp', 'snn_cnn', 'ann_snn').
     """
     train = getattr(args, "train", args)
     lr = train.lr
     weight_decay = getattr(train, "weight_decay", 1e-4)
 
-    # 1. Optimizer: AdamW comune a tutti i modelli (learning rate fisso)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    # 1. Optimizer: AdamW comune a tutti i modelli (parametri con gradiente abilitato)
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
+    optimizer = torch.optim.AdamW(trainable_params, lr=lr, weight_decay=weight_decay)
 
     # 2. Criterion: CrossEntropy (con label smoothing se previsto) o SNNLoss
     m_type = model_type.lower()
@@ -48,7 +49,7 @@ def get_training_components(model, args, model_type="default"):
         mem_weight = getattr(train, "mem_weight", 1.0)
         spike_weight = getattr(train, "spike_weight", 1.0)
         criterion = SNNLoss(mem_weight=mem_weight, spike_weight=spike_weight)
-    elif m_type in ("resnet", "mlp", "kan"):
+    elif m_type in ("resnet", "mlp", "kan", "direct_kan", "ann_snn"):
         criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
     else:
         criterion = nn.CrossEntropyLoss()

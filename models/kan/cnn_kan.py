@@ -111,7 +111,7 @@ def build_cnn_kan(in_channels=3, num_classes=10,
 # ── Entry point (chiamato da main.py) ────────────────────────────────────────
 
 def cnn_kan_run(args, train_loader, test_loader, profiler=None, device=None):
-    """Addestra e valuta un CNN-KAN con backpropagation standard."""
+    """Addestra e valuta un CNN-KAN con kan standard."""
     # Parametri di training
     epochs = args.train.epochs
     weight_decay = getattr(args.train, "weight_decay", 1e-4)

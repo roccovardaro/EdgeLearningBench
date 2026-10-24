@@ -90,5 +90,3 @@ def cifar10_dataloaders(
     )
     cifar10.setup()
     return cifar10.train_dataloader(), cifar10.test_dataloader()
-
-

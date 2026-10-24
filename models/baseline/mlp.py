@@ -63,7 +63,7 @@ def build_mlp(input_dim, num_classes, hidden_dims=(512, 256), dropout=0.2):
 # ── Entry point (chiamato da main.py) ────────────────────────────────────────
 
 def mlp_run(args, train_loader, test_loader, profiler=None, device=None):
-    """Addestra e valuta un MLP con backpropagation standard."""
+    """Addestra e valuta un MLP con kan standard."""
     epochs = args.train.epochs
     weight_decay = getattr(args.train, "weight_decay", 1e-4)
 

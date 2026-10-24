@@ -145,7 +145,7 @@ def build_snn_mlp(
 # ── Entry point (chiamato da main.py) ────────────────────────────────────────
 
 def snn_mlp_run(args, train_loader, test_loader, profiler=None, device=None):
-    """Addestra e valuta un SNN-MLP con rate coding e backpropagation surrogata."""
+    """Addestra e valuta un SNN-MLP con rate coding e kan surrogata."""
     epochs = args.train.epochs
     weight_decay = getattr(args.train, "weight_decay", 1e-4)
 
@@ -173,19 +173,21 @@ def snn_mlp_run(args, train_loader, test_loader, profiler=None, device=None):
     optimizer, criterion = get_training_components(
         model, args, model_type="snn_mlp"
     )
-    snn_prof = SNNProfiler(tag="snn_mlp", output_dir=RESULTS_DIR)
+    snn_prof = SNNProfiler(model=model, tag="snn_mlp", output_dir=RESULTS_DIR)
 
     # ── Training ────────────────────────────────────────────────
     for epoch in range(epochs):
         model.train()
         running_loss, correct, total = 0.0, 0, 0
 
-        for images, labels in train_loader:
+        for  images, labels in train_loader:
             images, labels = images.to(device), labels.to(device)
 
             optimizer.zero_grad()
             spk_out, mem_out = model(images)
             loss = criterion(spk_out, mem_out, labels)
+
+
             loss.backward()
             # Gradient clipping per stabilità con surrogate gradients
             nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -212,7 +214,11 @@ def snn_mlp_run(args, train_loader, test_loader, profiler=None, device=None):
 
     # ── Valutazione ─────────────────────────────────────────────
     train_acc = accuracy(model, train_loader, device)
+
+    snn_prof.reset()
     test_acc = accuracy(model, test_loader, device)
+    snn_prof.log_epoch("test", tag="test")
+
     print(f"Train accuracy: {train_acc:.4f}  (error: {1 - train_acc:.4f})")
     print(f"Test  accuracy: {test_acc:.4f}  (error: {1 - test_acc:.4f})")
 

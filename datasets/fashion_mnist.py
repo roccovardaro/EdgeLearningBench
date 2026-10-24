@@ -65,13 +65,19 @@ class FashionMNISTData:
         )
 
     def train_dataloader(self):
+        """
+        Restituisce il DataLoader per il set di training.
+        """
         return self._make_loader(self.train_dataset, shuffle=True, batch_size=self.train_batch_size)
 
     def test_dataloader(self):
+        """
+        Restituisce il DataLoader per il set di test.
+        """
         return self._make_loader(self.test_dataset, shuffle=False, batch_size=self.test_batch_size)
 
 
-def fashion_mnist_loaders(
+def fashion_mnist_dataloaders(
     batch_size=64,
     train_batch_size=None,
     test_batch_size=None,
@@ -94,5 +100,3 @@ def fashion_mnist_loaders(
     fashion_mnist.setup()
     return fashion_mnist.train_dataloader(), fashion_mnist.test_dataloader()
 
-
-fashion_mnist_dataloaders = fashion_mnist_loaders

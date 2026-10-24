@@ -1,11 +1,11 @@
 dataset:
-  name: fashion_mnist           # cifar10 | mnist | fashion_mnist
+  name: cifar10           # cifar10 | mnist | fashion_mnist
   augmentation: true      # Data augmentation (RandomCrop + RandomHorizontalFlip sul train set)
   normalize: true
 
 
-# Switch Paradigma: ff_resnet | ff_mlp | resnet | kan | mlp | cnn_kan | snn_mlp | snn_cnn | ltc | cnn_ltc
-paradigm: mlp
+# Switch Paradigma: ff_resnet | ff_mlp | resnet | kan | direct_kan | mlp | cnn_kan | snn_mlp | snn_cnn | ann_snn | ltc | cnn_ltc
+paradigm: ann_snn
 
 # Dispositivo di calcolo: auto | cuda | cuda:0 | mps | cpu
 device: auto
@@ -62,7 +62,7 @@ kan:
   model:
     input_dim: 3072          # 3×32×32 per CIFAR-10
     num_classes: 10
-    hidden_dims: [128, 64]   # Layer KAN intermedi compatti
+    hidden_dims: [256, 64]   # Layer KAN intermedi compatti
     grid_size: 5             # Risoluzione B-spline bilanciata per stabilità e velocità
     spline_order: 3          # B-spline cubica standard
     bottleneck_dim: 384      # Proiezione per pareggiare la capacità a ~1.76M
@@ -74,6 +74,29 @@ kan:
     batch_size: 128
     weight_decay: 0.0001
     regularization_lambda: 0.005
+  eval:
+    batch_size: 128
+
+
+# ── Direct KAN (senza proiezione lineare, ricezione diretta flatten) ──
+# Allineato a ~1.81M parametri (3072 → 64 → 64 → 10 con grid_size=5).
+# Riceve direttamente il vettore flatten di dimensione 3072 senza bottleneck lineare.
+direct_kan:
+  model:
+    input_dim: 3072          # 3×32×32 per CIFAR-10  (784 per MNIST/Fashion-MNIST)
+    num_classes: 10
+    hidden_dims: [64, 64]    # Layer KAN direttamente alimentati dal flatten
+    grid_size: 5             # Risoluzione B-spline bilanciata
+    spline_order: 3          # B-spline cubica standard
+    dropout: 0.2
+    use_input_norm: true     # LayerNorm su input_dim per intervallo spline [-1, 1]
+    checkpoint_name: direct_kan.pt
+  train:
+    epochs: 30              # Epoche di addestramento
+    lr: 0.003
+    batch_size: 128
+    weight_decay: 0.0001
+    regularization_lambda: 0.0
   eval:
     batch_size: 128
 
@@ -99,6 +122,7 @@ snn_mlp:
     spike_weight: 1.0        # Peso loss su spike
   eval:
     batch_size: 128
+
 
 
 # ── LTC (Liquid Time-Constant Network) ───────────────────────
@@ -230,3 +254,20 @@ ff_resnet:
     batch_size: 128
   eval:
     batch_size: 128
+
+
+# ── ANN-SNN ResNet (Conversione ANN-to-SNN via SpikingJelly) ──
+# ResNet-56 di baseline convertita in SNN tramite SpikingJelly rate-coding.
+ann_snn:
+  model:
+    in_channels: 3
+    num_classes: 10
+    baseline_checkpoint: resnet.pt # Checkpoint da cui riusare i pesi ANN (o riaddestrare)
+    checkpoint_name: ann_snn.pt
+    num_steps: 16              # Timestep di simulazione SNN (T)
+    conversion_mode: "99.9%"   # Modalità calibrazione: max | 99.9%
+  train:
+    batch_size: 128
+  eval:
+    batch_size: 128
+
