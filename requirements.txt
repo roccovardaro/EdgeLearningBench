@@ -1,0 +1,21 @@
+# ── EdgeLearningBench: Dipendenze Principali ─────────────────────────
+
+# Deep Learning & Vision
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Spiking Neural Networks (SNN)
+spikingjelly>=2.0.0
+
+# Kolmogorov-Arnold Networks (KAN)
+efficient-kan @ git+https://github.com/Blealtan/efficient-kan.git
+
+# Liquid Time-Constant Networks (LTC / NCPS)
+ncps>=1.0.0
+
+# Edge Profiling & Hardware Monitoring
+psutil>=5.9.0
+codecarbon>=2.3.0
+
+# Configurazioni YAML
+PyYAML>=6.0

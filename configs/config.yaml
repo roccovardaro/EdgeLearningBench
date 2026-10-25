@@ -5,7 +5,7 @@ dataset:
 
 
 # Switch Paradigma: ff_resnet | ff_mlp | resnet | kan | direct_kan | mlp | cnn_kan | snn_mlp | snn_cnn | ann_snn | ltc | cnn_ltc
-paradigm: ann_snn
+paradigm: snn_cnn
 
 # Dispositivo di calcolo: auto | cuda | cuda:0 | mps | cpu
 device: cpu
@@ -142,7 +142,7 @@ snn_mlp:
     num_classes: 10
     hidden_dims: [512, 256]
     beta: 0.95                # Costante di decadimento LIF
-    num_steps: 5            # Timestep di simulazione (rate coding)
+    num_steps: 16            # Timestep di simulazione (rate coding)
     dropout: 0.2
     checkpoint_name: snn_mlp.pt
   train:
@@ -159,17 +159,17 @@ snn_mlp:
 # ── Configurazione SNN-CNN (Spiking Convolutional Neural Network) ────
 snn_cnn:
   model:
-    in_channels: 3             # 3 per CIFAR-10, 1 per MNIST
+    in_channels: 1             # 3 per CIFAR-10, 1 per MNIST
     num_classes: 10
     cnn_channels: [32, 64, 128]
     beta: 0.95                 # Costante di decadimento LIF
-    num_steps: 5               # Timestep di simulazione (rate coding)
+    num_steps: 4               # Timestep di simulazione (rate coding)
     dropout: 0.2
     checkpoint_name: snn_cnn.pt
   train:
-    epochs: 30
+    epochs: 10
     lr: 0.002
-    batch_size: 64
+    batch_size: 128
     weight_decay: 0.0001
     mem_weight: 1.0            # Peso della loss sulla membrana
     spike_weight: 1.0          # Peso della loss sugli spike

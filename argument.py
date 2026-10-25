@@ -18,6 +18,8 @@ def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/config.yaml")
     parser.add_argument("--profiler_config", default="configs/profiler.yaml")
+    parser.add_argument("--device", default=None, help="Dispositivo di calcolo (cpu, mps, cuda, auto)")
+    parser.add_argument("--paradigm", default=None, help="Paradigma di calcolo/modello")
     cli_args = parser.parse_args()
 
     with open(cli_args.config, encoding="utf-8") as file:
@@ -30,6 +32,11 @@ def get_args():
             if isinstance(p_config, dict):
                 for k, v in p_config.items():
                     config[k] = v
+
+    if cli_args.device:
+        config["device"] = cli_args.device
+    if cli_args.paradigm:
+        config["paradigm"] = cli_args.paradigm
 
     args = to_namespace(config)
     return args

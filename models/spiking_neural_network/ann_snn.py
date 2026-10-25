@@ -5,11 +5,8 @@ from device import get_device
 from paths import CHECKPOINT_DIR
 from models.baseline.resnet import resnet
 
-try:
-    from spikingjelly.activation_based import ann2snn, functional
-except ImportError:
-    ann2snn = None
-    functional = None
+from spikingjelly.activation_based import ann2snn, functional
+
 
 
 def load_ann_from_checkpoint(checkpoint_path, device):
@@ -49,9 +46,6 @@ def prepare_ann_for_snn(model):
 
 def convert_to_snn(ann_model, train_loader, device, mode="99.9%"):
     """Converte la ResNet in SNN calibrando le soglie sul train_loader."""
-    if ann2snn is None:
-        raise ImportError("SpikingJelly non è installata. Esegui: pip install spikingjelly")
-
     ann_model = prepare_ann_for_snn(ann_model)
     ann_model.eval()
 
@@ -82,8 +76,7 @@ def evaluate_snn(snn_model, test_loader, device, T=16):
         correct += (out_spikes_sum.argmax(1) == labels).sum().item()
         total += labels.size(0)
 
-        if functional is not None:
-            functional.reset_net(snn_model)
+        functional.reset_net(snn_model)
 
     acc = correct / total
     print(f"SNN Test Accuracy (T={T}): {acc:.4f} (error: {1 - acc:.4f})")

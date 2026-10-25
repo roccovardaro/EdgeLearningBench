@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 import torch
 import torch.nn as nn
+from spikingjelly.activation_based import functional as sj_functional
 
 
 def compute_model_macs(model: nn.Module) -> int:
@@ -71,6 +72,7 @@ def compute_model_macs(model: nn.Module) -> int:
             model.train()
         for h in hooks:
             h.remove()
+        sj_functional.reset_net(model)
 
     return sum(macs_dict.values())
 
@@ -93,23 +95,24 @@ class SNNProfiler:
         self.output_dir = Path(output_dir) if output_dir else Path.cwd() / "results"
         self.records: List[Dict[str, Any]] = []
 
-        self.num_steps = num_steps or (getattr(model, "num_steps", 1) if model else 1)
-        self.total_macs = compute_model_macs(model) if model is not None else 0 #Calcola una sola volta i MAC statici totali del modello
+        # Hook per intercettare gli spike da tutti i neuroni LIF/IF
+        self._hooks = []
+        self._has_hooks = False
 
         # Accumulatori per l'epoca corrente
         self._epoch_spikes = 0
         self._epoch_elements = 0
 
-        # Hook per intercettare gli spike da tutti i neuroni LIF/IF
-        self._hooks = []
-        self._has_hooks = False
+        self.num_steps = num_steps or (getattr(model, "num_steps", 1) if model else 1)
+        self.total_macs = compute_model_macs(model) if model is not None else 0 #Calcola una sola volta i MAC statici totali del modello
+
         if model is not None:
             self._attach_hooks(model)
 
     def _attach_hooks(self, model: nn.Module):
         """Aggancia hook leggeri a tutti i neuroni spiking."""
         for m in model.modules():
-            if m.__class__.__name__ in ("Leaky", "Synaptic", "Alpha", "IFNode", "LIFNode"):
+            if m.__class__.__name__ in ("Leaky", "Synaptic", "Alpha", "IFNode", "LIFNode", "ParametricLIFNode"):
                 self._has_hooks = True
                 self._hooks.append(m.register_forward_hook(self._hook_fn))
 
@@ -228,9 +231,11 @@ class SNNProfiler:
 
     def cleanup(self):
         """Rimuove gli hook registrati."""
-        for h in self._hooks:
+        hooks = getattr(self, "_hooks", [])
+        for h in hooks:
             h.remove()
-        self._hooks.clear()
+        if hasattr(self, "_hooks"):
+            self._hooks.clear()
 
     def __del__(self):
         self.cleanup()

@@ -1,13 +1,14 @@
 """
-SNN-MLP (Spiking Neural Network – Multi-Layer Perceptron) con rate coding.
+SNN-MLP (Spiking Neural Network – Multi-Layer Perceptron) con rate coding e SpikingJelly.
 
-Utilizza neuroni Leaky Integrate-and-Fire (LIF) di snntorch, con rate coding
+Utilizza neuroni Leaky Integrate-and-Fire (LIFNode) di SpikingJelly, con rate coding
 per la codifica degli input e surrogate gradient descent per l'addestramento.
 """
 import torch
 import torch.nn as nn
-import snntorch as snn
-from snntorch import surrogate
+
+from spikingjelly.activation_based import neuron, surrogate, functional
+
 from device import get_device
 from paths import CHECKPOINT_DIR, RESULTS_DIR
 from profiler.snn_profiler import SNNProfiler
@@ -18,13 +19,13 @@ from models.training_setup import get_training_components
 # ── Modello ──────────────────────────────────────────────────────────────────
 
 class SpikingMLP(nn.Module):
-    """SNN-MLP con neuroni LIF e rate coding.
+    """SNN-MLP con neuroni LIF di SpikingJelly e rate coding.
 
     Architettura per blocco:
-        Linear → BatchNorm1d → LIF (Leaky Integrate-and-Fire)
+        Linear → BatchNorm1d → LIFNode → Dropout
 
     L'input viene presentato come spike rate-coded per `num_steps` timestep.
-    L'output è la membrana cumulata sull'ultimo layer LIF.
+    L'output è costituito da spike e potenziale di membrana accumulati sull'ultimo layer LIF.
     """
 
     def __init__(
@@ -42,8 +43,12 @@ class SpikingMLP(nn.Module):
         self.num_steps = num_steps
         self.beta = beta
 
-        # Surrogate gradient: fast sigmoid
-        spike_grad = surrogate.fast_sigmoid(slope=25)
+        # Relazione tau e decadimento beta: tau = 1 / (1 - beta)
+        tau = 1.0 / (1.0 - beta) if (beta is not None and beta < 1.0) else 20.0
+        self.tau = tau
+
+        # Surrogate gradient standard di SpikingJelly (ATan per stabilità numerica)
+        spike_grad = surrogate.ATan()
 
         # ── Layer nascosti ──
         self.layers = nn.ModuleList()
@@ -55,14 +60,24 @@ class SpikingMLP(nn.Module):
         for h_dim in hidden_dims:
             self.layers.append(nn.Linear(in_dim, h_dim, bias=False))
             self.bns.append(nn.BatchNorm1d(h_dim))
-            self.lif_neurons.append(snn.Leaky(beta=beta, spike_grad=spike_grad, learn_beta=True))
+            self.lif_neurons.append(
+                neuron.ParametricLIFNode(
+                    init_tau=tau,
+                    decay_input=False,
+                    surrogate_function=spike_grad,
+                    step_mode="s",
+                )
+            )
             self.dropouts.append(nn.Dropout(p=dropout))
             in_dim = h_dim
 
         # ── Layer di output ──
         self.output_layer = nn.Linear(in_dim, num_classes)
-        self.output_lif = snn.Leaky(
-            beta=beta, spike_grad=spike_grad, learn_beta=True, output=True
+        self.output_lif = neuron.ParametricLIFNode(
+            init_tau=tau,
+            decay_input=False,
+            surrogate_function=spike_grad,
+            step_mode="s",
         )
 
     def forward(self, x):
@@ -75,39 +90,33 @@ class SpikingMLP(nn.Module):
             spk_out: Spike di output accumulati [num_steps, B, num_classes]
             mem_out: Potenziale di membrana accumulato [num_steps, B, num_classes]
         """
+        # Reset delle membrane all'inizio di ogni inferenza/passaggio
+        functional.reset_net(self)
         x = x.flatten(1)  # [B, D]
 
-        # ── Inizializza le membrane ──
-        mem_list = []
-        for lif in self.lif_neurons:
-            mem_list.append(lif.init_leaky())
-        mem_output = self.output_lif.init_leaky()
-
-        # ── Registri per le uscite ──
         spk_recordings = []
         mem_recordings = []
 
-        # ── Simulazione temporale con rate coding ──
-        for step in range(self.num_steps):
-            # Rate coding: gli input vengono convertiti in spike con probabilità
-            # proporzionale all'intensità del pixel (dopo clamp in [0, 1]).
+        for _ in range(self.num_steps):
+            # Rate coding: conversione in spike proporzionali all'intensità
             rate = x.clamp(0.0, 1.0)
-            inp = torch.bernoulli(rate)
+            cur = torch.bernoulli(rate)
 
             # Propagazione attraverso i layer nascosti
-            cur = inp
-            for i, (linear, bn, lif, drop) in enumerate(zip(self.layers, self.bns, self.lif_neurons, self.dropouts)):
-                cur = linear(cur) #Dopo Linear otteniamo valori reali
+            for linear, bn, lif, drop in zip(
+                self.layers, self.bns, self.lif_neurons, self.dropouts
+            ):
+                cur = linear(cur)
                 cur = bn(cur)
-                spk, mem_list[i] = lif(cur, mem_list[i])
+                spk = lif(cur)
                 cur = drop(spk)
 
             # Layer di output
             cur = self.output_layer(cur)
-            spk_out, mem_output = self.output_lif(cur, mem_output)
+            spk_out = self.output_lif(cur)
 
             spk_recordings.append(spk_out)
-            mem_recordings.append(mem_output)
+            mem_recordings.append(self.output_lif.v)
 
         return torch.stack(spk_recordings), torch.stack(mem_recordings)
 
@@ -133,19 +142,15 @@ def build_snn_mlp(
     )
     total_params = sum(p.numel() for p in model.parameters())
     print(f"SNN-MLP layers: {[input_dim] + list(hidden_dims) + [num_classes]}")
-    print(f"Timesteps: {num_steps} | Beta: {beta} | Dropout: {dropout}")
+    print(f"Timesteps: {num_steps} | Beta: {beta} (Tau: {model.tau:.2f}) | Dropout: {dropout}")
     print(f"Parametri totali: {total_params:,}")
     return model
-
-
-# SNNLoss è importata da training_setup
-
 
 
 # ── Entry point (chiamato da main.py) ────────────────────────────────────────
 
 def snn_mlp_run(args, train_loader, test_loader, profiler=None, device=None):
-    """Addestra e valuta un SNN-MLP con rate coding e kan surrogata."""
+    """Addestra e valuta un SNN-MLP con rate coding e SpikingJelly."""
     epochs = args.train.epochs
     weight_decay = getattr(args.train, "weight_decay", 1e-4)
 
@@ -155,9 +160,6 @@ def snn_mlp_run(args, train_loader, test_loader, profiler=None, device=None):
     beta = getattr(args.model, "beta", 0.95)
     num_steps = getattr(args.model, "num_steps", 25)
     dropout = getattr(args.model, "dropout", 0.2)
-
-    mem_weight = getattr(args.train, "mem_weight", 1.0)
-    spike_weight = getattr(args.train, "spike_weight", 1.0)
 
     device = get_device(device)
 
@@ -180,18 +182,19 @@ def snn_mlp_run(args, train_loader, test_loader, profiler=None, device=None):
         model.train()
         running_loss, correct, total = 0.0, 0, 0
 
-        for  images, labels in train_loader:
+        for images, labels in train_loader:
             images, labels = images.to(device), labels.to(device)
 
             optimizer.zero_grad()
             spk_out, mem_out = model(images)
             loss = criterion(spk_out, mem_out, labels)
 
-
             loss.backward()
-            # Gradient clipping per stabilità con surrogate gradients
             nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
+
+            # Reset canonico SpikingJelly dopo l'aggiornamento dei pesi
+            functional.reset_net(model)
 
             running_loss += loss.item() * labels.size(0)
 
@@ -199,7 +202,7 @@ def snn_mlp_run(args, train_loader, test_loader, profiler=None, device=None):
             mem_avg = mem_out.mean(dim=0).detach()
             correct += (mem_avg.argmax(1) == labels).sum().item()
             total += labels.size(0)
-            
+
             snn_prof.update(spk_out)
 
         print(
@@ -237,8 +240,10 @@ def snn_mlp_run(args, train_loader, test_loader, profiler=None, device=None):
             "num_classes": num_classes,
             "hidden_dims": list(hidden_dims),
             "beta": beta,
+            "tau": model.tau,
             "num_steps": num_steps,
             "dropout": dropout,
+            "backend": "spikingjelly",
         },
         "train_accuracy": train_acc,
         "test_accuracy": test_acc,

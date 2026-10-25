@@ -5,6 +5,9 @@ import torch
 from device import get_device
 
 
+from spikingjelly.activation_based import functional as sj_functional
+
+
 @torch.no_grad()
 def accuracy(model, loader, device=None):
     """Calcola l'accuratezza su un DataLoader per qualsiasi modello supportato.
@@ -38,6 +41,8 @@ def accuracy(model, loader, device=None):
 
             correct += (preds == labels).sum().item()
             total += labels.size(0)
+
+            sj_functional.reset_net(model)
 
         if total == 0:
             raise ValueError("Il DataLoader di valutazione è vuoto.")
