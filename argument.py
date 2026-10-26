@@ -16,7 +16,7 @@ def to_namespace(value):
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="configs/config.yaml")
+    parser.add_argument("--config", default="configs/mnist.yaml")
     parser.add_argument("--profiler_config", default="configs/profiler.yaml")
     parser.add_argument("--device", default=None, help="Dispositivo di calcolo (cpu, mps, cuda, auto)")
     parser.add_argument("--paradigm", default=None, help="Paradigma di calcolo/modello")

@@ -1,14 +1,17 @@
 """
-SNN-CNN (Spiking Convolutional Neural Network) con SpikingJelly.
+SNN-CNN (Spiking Convolutional Neural Network) con SpikingJelly e multi-step mode.
 
 Architettura che combina blocchi convoluzionali con neuroni
-Leaky Integrate-and-Fire (LIFNode) di SpikingJelly.
+ParametricLIFNode di SpikingJelly in multi-step mode (step_mode='m').
 L'output è costituito dagli spike e dal potenziale di membrana
 cumulati sull'ultimo layer LIF.
 """
+from pathlib import Path
 import torch
 import torch.nn as nn
-from spikingjelly.activation_based import neuron, surrogate, functional
+
+from spikingjelly.activation_based import layer, neuron, surrogate, functional
+
 from device import get_device
 from paths import CHECKPOINT_DIR, RESULTS_DIR
 from profiler.snn_profiler import SNNProfiler
@@ -19,9 +22,9 @@ from models.training_setup import get_training_components
 # ── Blocco Conv Spiking ──────────────────────────────────────────────────────
 
 class SpikingConvBlock(nn.Module):
-    """Singolo blocco convoluzionale spiking con SpikingJelly.
+    """Singolo blocco convoluzionale spiking con SpikingJelly in multi-step mode.
 
-    Conv2d → BatchNorm2d → LIFNode → MaxPool2d
+    Conv2d → BatchNorm2d → LIFNode → MaxPool2d (tutti con step_mode='m')
     """
 
     def __init__(
@@ -34,30 +37,33 @@ class SpikingConvBlock(nn.Module):
         pool_size=2,
     ):
         super().__init__()
-        self.conv = nn.Conv2d(
+        self.conv = layer.Conv2d(
             in_channels,
             out_channels,
             kernel_size=kernel_size,
             padding=kernel_size // 2,
             bias=False,
+            step_mode="m",
         )
-        self.bn = nn.BatchNorm2d(out_channels)
+        self.bn = layer.BatchNorm2d(out_channels, step_mode="m")
         self.lif = neuron.ParametricLIFNode(
             init_tau=tau,
             decay_input=False,
             surrogate_function=surrogate_function,
-            step_mode="s",
+            step_mode="m",
         )
-        self.pool = nn.MaxPool2d(kernel_size=pool_size, stride=pool_size)
+        self.pool = layer.MaxPool2d(
+            kernel_size=pool_size, stride=pool_size, step_mode="m"
+        )
 
     def forward(self, x):
-        """Propagazione di un singolo timestep.
+        """Propagazione multi-step [T, B, C, H, W].
 
         Args:
-            x: Tensor [B, C_in, H, W]
+            x: Tensor [num_steps, B, C_in, H, W]
 
         Returns:
-            spk: Spike in uscita [B, C_out, H', W']
+            spk: Spike in uscita [num_steps, B, C_out, H', W']
         """
         x = self.conv(x)
         x = self.bn(x)
@@ -71,8 +77,9 @@ class SpikingConvBlock(nn.Module):
 class SpikingCNN(nn.Module):
     """SNN-CNN con blocchi convoluzionali spiking e classificatore FC spiking.
 
-    Architettura:
-        [SpikingConvBlock × N] → AdaptiveAvgPool2d(1) → Flatten
+    Architettura multi-step (step_mode='m'):
+        Rate coding / espansione temporale [T, B, C, H, W]
+        → [SpikingConvBlock × N] → AdaptiveAvgPool2d(1) → Flatten → Dropout
         → Linear → LIFNode (output)
 
     L'output fornisce spike e potenziali di membrana registrati per num_steps timestep.
@@ -86,16 +93,21 @@ class SpikingCNN(nn.Module):
         beta=0.95,
         num_steps=25,
         dropout=0.2,
+        use_rate_coding=True,
     ):
         super().__init__()
+        self.in_channels = in_channels
+        self.num_classes = num_classes
         self.num_steps = num_steps
         self.beta = beta
+        self.use_rate_coding = use_rate_coding
 
         # Relazione tau e decadimento beta: tau = 1 / (1 - beta)
         tau = 1.0 / (1.0 - beta) if (beta is not None and beta < 1.0) else 20.0
         self.tau = tau
 
         spike_grad = surrogate.ATan()
+        self.spike_grad = spike_grad
 
         # ── Blocchi convoluzionali spiking ──
         self.conv_blocks = nn.ModuleList()
@@ -108,22 +120,23 @@ class SpikingCNN(nn.Module):
             )
             ch_in = ch_out
 
-        # ── Pooling globale ──
-        self.global_pool = nn.AdaptiveAvgPool2d(1)
-        self.flatten = nn.Flatten(1)
-        self.dropout = nn.Dropout(p=dropout)
+        # ── Pooling globale, flatten e dropout multi-step ──
+        self.global_pool = layer.AdaptiveAvgPool2d(1, step_mode="m")
+        self.flatten = layer.Flatten(step_mode="m")
+        self.dropout = layer.Dropout(p=dropout, step_mode="m")
 
-        # ── Classificatore FC spiking ──
-        self.fc = nn.Linear(cnn_channels[-1], num_classes)
+        # ── Classificatore FC spiking multi-step ──
+        self.fc = layer.Linear(cnn_channels[-1], num_classes, step_mode="m")
         self.output_lif = neuron.ParametricLIFNode(
             init_tau=tau,
             decay_input=False,
             surrogate_function=spike_grad,
-            step_mode="s",
+            step_mode="m",
+            store_v_seq=True,
         )
 
     def forward(self, x):
-        """Forward pass.
+        """Forward pass multi-step con rate coding.
 
         Args:
             x: Tensor [B, C, H, W]
@@ -135,29 +148,29 @@ class SpikingCNN(nn.Module):
         # Reset delle membrane all'inizio di ogni inferenza/passaggio
         functional.reset_net(self)
 
-        spk_recordings = []
-        mem_recordings = []
+        # Ripetizione temporale multi-step [num_steps, B, C, H, W]
+        x_seq = x.unsqueeze(0).repeat(self.num_steps, *([1] * x.ndim))
+        if self.use_rate_coding:
+            rate = x_seq.clamp(0.0, 1.0)
+            cur = torch.bernoulli(rate)
+        else:
+            cur = x_seq
 
-        for _ in range(self.num_steps):
-            cur = x
+        # Propagazione attraverso i blocchi conv spiking
+        for block in self.conv_blocks:
+            cur = block(cur)
 
-            # Propagazione attraverso i blocchi conv spiking
-            for block in self.conv_blocks:
-                cur = block(cur)
+        # Pooling globale + flatten + dropout
+        cur = self.global_pool(cur)
+        cur = self.flatten(cur)
+        cur = self.dropout(cur)
 
-            # Pooling globale + flatten + dropout
-            cur = self.global_pool(cur)
-            cur = self.flatten(cur)
-            cur = self.dropout(cur)
+        # Classificatore FC spiking
+        cur = self.fc(cur)
+        spk_out = self.output_lif(cur)
+        mem_out = self.output_lif.v_seq
 
-            # Classificatore FC spiking
-            cur = self.fc(cur)
-            spk_out = self.output_lif(cur)
-
-            spk_recordings.append(spk_out)
-            mem_recordings.append(self.output_lif.v)
-
-        return torch.stack(spk_recordings), torch.stack(mem_recordings)
+        return spk_out, mem_out
 
 
 # ── Factory ──────────────────────────────────────────────────────────────────
@@ -169,6 +182,7 @@ def build_snn_cnn(
     beta=0.95,
     num_steps=25,
     dropout=0.2,
+    use_rate_coding=True,
 ):
     """Costruisce un SpikingCNN con i parametri specificati."""
     model = SpikingCNN(
@@ -178,6 +192,7 @@ def build_snn_cnn(
         beta=beta,
         num_steps=num_steps,
         dropout=dropout,
+        use_rate_coding=use_rate_coding,
     )
     total_params = sum(p.numel() for p in model.parameters())
     conv_params = sum(
@@ -185,7 +200,7 @@ def build_snn_cnn(
     )
     fc_params = sum(p.numel() for p in model.fc.parameters())
     print(f"SNN-CNN channels: {list(cnn_channels)}")
-    print(f"Timesteps: {num_steps} | Beta: {beta} (Tau: {model.tau:.2f}) | Dropout: {dropout}")
+    print(f"Timesteps: {num_steps} | Beta: {beta} (Tau: {model.tau:.2f}) | Dropout: {dropout} | Rate coding: {use_rate_coding}")
     print(f"Parametri — Conv: {conv_params:,}  FC: {fc_params:,}  Totale: {total_params:,}")
     return model
 
@@ -193,7 +208,7 @@ def build_snn_cnn(
 # ── Entry point (chiamato da main.py) ────────────────────────────────────────
 
 def snn_cnn_run(args, train_loader, test_loader, profiler=None, device=None):
-    """Addestra e valuta un SNN-CNN con SpikingJelly."""
+    """Addestra e valuta un SNN-CNN con SpikingJelly in multi-step mode."""
     epochs = args.train.epochs
     weight_decay = getattr(args.train, "weight_decay", 1e-4)
 
@@ -203,8 +218,13 @@ def snn_cnn_run(args, train_loader, test_loader, profiler=None, device=None):
     beta = getattr(args.model, "beta", 0.95)
     num_steps = getattr(args.model, "num_steps", 25)
     dropout = getattr(args.model, "dropout", 0.2)
+    use_rate_coding = getattr(args.model, "use_rate_coding", True)
 
     device = get_device(device)
+    if device.type == "mps":
+        print("[SpikingJelly] I neuroni SpikingJelly supportano solo CPU e NVIDIA CUDA (non Apple Silicon MPS).")
+        print("[SpikingJelly] L'esecuzione viene commutata automaticamente su CPU.")
+        device = torch.device("cpu")
 
     model = build_snn_cnn(
         in_channels=in_channels,
@@ -213,6 +233,7 @@ def snn_cnn_run(args, train_loader, test_loader, profiler=None, device=None):
         beta=beta,
         num_steps=num_steps,
         dropout=dropout,
+        use_rate_coding=use_rate_coding,
     ).to(device)
 
     optimizer, criterion = get_training_components(
@@ -285,6 +306,7 @@ def snn_cnn_run(args, train_loader, test_loader, profiler=None, device=None):
             "tau": model.tau,
             "num_steps": num_steps,
             "dropout": dropout,
+            "use_rate_coding": use_rate_coding,
             "backend": "spikingjelly",
         },
         "train_accuracy": train_acc,

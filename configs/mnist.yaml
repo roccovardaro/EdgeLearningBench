@@ -1,0 +1,342 @@
+# ==============================================================================
+# CONFIGURAZIONE EDGELEARNINGBENCH - DATASET: MNIST
+# ==============================================================================
+# Risoluzione: 1×28×28 (Grayscale, 1 canale)
+# Dimensione flatten: 784
+# Classi: 10 (cifre numeriche da 0 a 9)
+# Normalizzazione: media=0.1307, deviazione standard=0.3081
+# ==============================================================================
+
+dataset:
+  name: mnist               # mnist | fashion_mnist | cifar10
+  augmentation: false       # false di default per cifre; true applica RandomCrop(28, pad=2) + RandomRotation(10)
+  normalize: true           # Normalizzazione Z-score; impostare a false esclusivamente se si esegue snn_stdp
+
+# Paradigma attivo:
+# ff_mlp | ff_resnet | resnet | cnn | kan | direct_kan | mlp | cnn_kan |
+# snn_mlp | snn_cnn | snn_resnet | snn_stdp | mlp_snn | cnn_snn | ltc | cnn_ltc
+paradigm: cnn
+
+# Dispositivo di calcolo: auto | cpu | mps | cuda | cuda:0
+device: auto
+
+
+# ==============================================================================
+# TRACCIA 1: PARADIGMI DENSI / FULLY CONNECTED (Input flatten: 784)
+# ==============================================================================
+
+# ── MLP Standard (Backpropagation) ───────────────────────────
+mlp:
+  model:
+    input_dim: 784
+    num_classes: 10
+    hidden_dims: [512, 256]
+    dropout: 0.2
+    checkpoint_name: mlp_mnist.pt
+  train:
+    epochs: 15
+    lr: 0.002
+    batch_size: 128
+    weight_decay: 0.0001
+  eval:
+    batch_size: 128
+
+
+# ── FF-MLP (Forward-Forward Hinton) ──────────────────────────
+ff_mlp:
+  model:
+    input_dim: 784
+    num_classes: 10
+    hidden_dims: [512, 256]
+    checkpoint_name: ff_mlp_mnist.pt
+  train:
+    epochs_per_layer: 20
+    lr: 0.03
+    threshold: 2.0
+    batch_size: 256
+  eval:
+    batch_size: 256
+
+
+# ── KAN (Kolmogorov-Arnold Network con Bottleneck) ───────────
+kan:
+  model:
+    input_dim: 784
+    num_classes: 10
+    hidden_dims: [128, 64]
+    grid_size: 5
+    spline_order: 3
+    direct: false
+    bottleneck_dim: 128
+    dropout: 0.1
+    use_input_norm: true
+    checkpoint_name: kan_mnist.pt
+  train:
+    epochs: 15
+    lr: 0.003
+    batch_size: 128
+    weight_decay: 0.0001
+    regularization_lambda: 0.0
+  eval:
+    batch_size: 128
+
+
+# ── Direct KAN (Ricezione diretta vettore flatten 784) ───────
+direct_kan:
+  model:
+    input_dim: 784
+    num_classes: 10
+    hidden_dims: [128, 64]
+    grid_size: 5
+    spline_order: 3
+    dropout: 0.1
+    use_input_norm: true
+    checkpoint_name: direct_kan_mnist.pt
+  train:
+    epochs: 15
+    lr: 0.003
+    batch_size: 128
+    weight_decay: 0.0001
+    regularization_lambda: 0.0
+  eval:
+    batch_size: 128
+
+
+# ── SNN-MLP (Spiking Neural Network – Rate Coding) ───────────
+snn_mlp:
+  model:
+    input_dim: 784
+    num_classes: 10
+    hidden_dims: [512, 256]
+    beta: 0.95
+    num_steps: 16
+    dropout: 0.2
+    checkpoint_name: snn_mlp_mnist.pt
+  train:
+    epochs: 15
+    lr: 0.002
+    batch_size: 128
+    weight_decay: 0.0001
+    mem_weight: 1.0
+    spike_weight: 1.0
+  eval:
+    batch_size: 128
+
+
+# ── LTC (Liquid Time-Constant Network) ───────────────────────
+ltc:
+  model:
+    input_dim: 784
+    num_classes: 10
+    units: 64
+    num_steps: 8
+    dropout: 0.2
+    checkpoint_name: ltc_mnist.pt
+  train:
+    epochs: 20
+    lr: 0.001
+    batch_size: 64
+    weight_decay: 0.0001
+  eval:
+    batch_size: 128
+
+
+# ==============================================================================
+# TRACCIA 2: PARADIGMI CONVOLUZIONALI ED IBRIDI (Input 2D: 1 canale, 28×28)
+# ==============================================================================
+
+# ── CNN Baseline ─────────────────────────────────────────────
+cnn:
+  model:
+    in_channels: 1
+    num_classes: 10
+    cnn_channels: [32, 64, 128]
+    fc_dims: []
+    dropout: 0.2
+    checkpoint_name: cnn_mnist.pt
+  train:
+    epochs: 15
+    lr: 0.001
+    batch_size: 128
+    weight_decay: 0.0001
+  eval:
+    batch_size: 128
+
+
+# ── CNN-KAN (Backbone Convoluzionale + Classificatore KAN) ───
+cnn_kan:
+  model:
+    in_channels: 1
+    num_classes: 10
+    cnn_channels: [32, 64, 128]
+    hidden_dims: [64]
+    grid_size: 5
+    spline_order: 3
+    checkpoint_name: cnn_kan_mnist.pt
+  train:
+    epochs: 15
+    lr: 0.005
+    batch_size: 64
+    weight_decay: 0.0005
+    regularization_lambda: 0.005
+  eval:
+    batch_size: 128
+
+
+# ── CNN-LTC (Backbone Convoluzionale + Cella LTC) ────────────
+cnn_ltc:
+  model:
+    in_channels: 1
+    num_classes: 10
+    cnn_channels: [32, 64, 128]
+    units: 64
+    num_steps: 8
+    dropout: 0.2
+    checkpoint_name: cnn_ltc_mnist.pt
+  train:
+    epochs: 20
+    lr: 0.001
+    batch_size: 64
+    weight_decay: 0.0001
+  eval:
+    batch_size: 128
+
+
+# ── SNN-CNN (Spiking Convolutional Neural Network) ───────────
+snn_cnn:
+  model:
+    in_channels: 1
+    num_classes: 10
+    cnn_channels: [32, 64, 128]
+    beta: 0.95
+    num_steps: 8
+    dropout: 0.2
+    checkpoint_name: snn_cnn_mnist.pt
+  train:
+    epochs: 15
+    lr: 0.002
+    batch_size: 128
+    weight_decay: 0.0001
+    mem_weight: 1.0
+    spike_weight: 1.0
+  eval:
+    batch_size: 128
+
+
+# ==============================================================================
+# TRACCIA 3: RESIDUAL NETWORKS (Confronto Deep Residual)
+# ==============================================================================
+
+# ── ResNet (Backpropagation Standard) ─────────────────────────
+resnet:
+  model:
+    in_channels: 1
+    num_classes: 10
+    layers: [3, 3, 3]          # ResNet-20
+    checkpoint_name: resnet_mnist.pt
+  train:
+    epochs: 15
+    lr: 0.001
+    batch_size: 128
+    weight_decay: 0.0001
+  eval:
+    batch_size: 128
+
+
+# ── FF-ResNet (Forward-Forward Residual Network) ─────────────
+ff_resnet:
+  model:
+    in_channels: 1
+    num_classes: 10
+    threshold: 1.0
+    checkpoint_name: ff_resnet_mnist.pt
+  train:
+    epochs_per_layer: 20
+    lr: 0.001
+    batch_size: 128
+  eval:
+    batch_size: 128
+
+
+# ── SNN-ResNet (Spiking Residual Network) ─────────────────────
+snn_resnet:
+  model:
+    in_channels: 1
+    num_classes: 10
+    layers: [3, 3, 3]          # SNN-ResNet-20
+    beta: 0.95
+    num_steps: 8
+    use_rate_coding: true
+    checkpoint_name: snn_resnet_mnist.pt
+  train:
+    epochs: 15
+    lr: 0.001
+    batch_size: 64
+    weight_decay: 0.0001
+    mem_weight: 1.0
+    spike_weight: 1.0
+  eval:
+    batch_size: 128
+
+
+# ==============================================================================
+# TRACCIA 4: SNN NON SUPERVISIONATA (STDP) E CONVERSIONE ANN-TO-SNN
+# ==============================================================================
+
+# ── SNN-STDP (Spike-Timing Dependent Plasticity) ──────────────
+# NOTA: Per eseguire snn_stdp, impostare `normalize: false` nella sezione dataset!
+snn_stdp:
+  model:
+    input_dim: 784
+    hidden_neurons: 800
+    homeostasis_gain: 0.02
+    inhibition: 0.15
+    v_threshold: 0.01
+    inhibition_tau: 2.0
+    refractory_steps: 2
+    bias_initial: 0.005
+    num_steps: 75
+    checkpoint_name: snn_stdp_mnist.pt
+  train:
+    epochs: 4
+    ltp: 0.000875
+    batch_size: 32
+    train_samples: 10000
+    calibration_samples: 2000
+  eval:
+    batch_size: 128
+    test_samples: 10000
+
+
+# ── MLP-SNN (Conversione ANN-to-SNN via SpikingJelly) ─────────
+mlp_snn:
+  model:
+    input_dim: 784
+    num_classes: 10
+    hidden_dims: [512, 256]
+    baseline_checkpoint: mlp_mnist.pt
+    checkpoint_name: mlp_snn_mnist.pt
+    num_steps: 32
+    conversion_mode: "99.9%"
+  train:
+    batch_size: 128
+  eval:
+    batch_size: 128
+
+
+# ── CNN-SNN (Conversione ANN-to-SNN via SpikingJelly) ─────────
+cnn_snn:
+  model:
+    in_channels: 1
+    num_classes: 10
+    cnn_channels: [32, 64, 128]
+    fc_dims: []
+    dropout: 0.2
+    baseline_checkpoint: cnn_mnist.pt
+    checkpoint_name: cnn_snn_mnist.pt
+    num_steps: 32
+    conversion_mode: "99.9%"
+  train:
+    batch_size: 128
+  eval:
+    batch_size: 128

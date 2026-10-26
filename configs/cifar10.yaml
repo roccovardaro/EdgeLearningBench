@@ -1,0 +1,355 @@
+# ==============================================================================
+# CONFIGURAZIONE EDGELEARNINGBENCH - DATASET: CIFAR-10
+# ==============================================================================
+# Risoluzione: 3×32×32 (RGB, 3 canali)
+# Dimensione flatten: 3072 (3 × 32 × 32)
+# Classi: 10 (airplane, auto, bird, cat, deer, dog, frog, horse, ship, truck)
+# Preprocessing: media=(0.4914, 0.4822, 0.4465), std=(0.2023, 0.1994, 0.2010)
+# Data Augmentation: RandomCrop(32, pad=4) + RandomHorizontalFlip()
+# ==============================================================================
+
+dataset:
+  name: cifar10             # mnist | fashion_mnist | cifar10
+  augmentation: true        # Data augmentation abilitata (RandomCrop + RandomHorizontalFlip)
+  normalize: true           # Normalizzazione Z-score a 3 canali RGB
+
+# Paradigma attivo:
+# ff_mlp | ff_resnet | resnet | cnn | kan | direct_kan | mlp | cnn_kan |
+# snn_mlp | snn_cnn | snn_resnet | snn_stdp | mlp_snn | cnn_snn | ltc | cnn_ltc
+paradigm: resnet
+
+# Dispositivo di calcolo: auto | cpu | mps | cuda | cuda:0
+device: auto
+
+
+# ==============================================================================
+# TRACCIA 1: PARADIGMI DENSI / FULLY CONNECTED (Allineamento capacità ~1.7M)
+# Benchmark su CIFAR-10 appiattito (dimensione 3072)
+# ==============================================================================
+
+# ── MLP Standard (Backpropagation) ───────────────────────────
+# Capacità: ~1.71M parametri (3072 → 512 → 256 → 10)
+mlp:
+  model:
+    input_dim: 3072          # 3×32×32 per CIFAR-10
+    num_classes: 10
+    hidden_dims: [512, 256]
+    dropout: 0.2
+    checkpoint_name: mlp_cifar10.pt
+  train:
+    epochs: 30
+    lr: 0.002
+    batch_size: 128
+    weight_decay: 0.0001
+  eval:
+    batch_size: 128
+
+
+# ── FF-MLP (Forward-Forward Hinton) ──────────────────────────
+# Capacità: ~1.70M parametri (3072 → 512 → 256) per parità con MLP
+ff_mlp:
+  model:
+    input_dim: 3072          # 3×32×32 per CIFAR-10
+    num_classes: 10
+    hidden_dims: [512, 256]
+    checkpoint_name: ff_mlp_cifar10.pt
+  train:
+    epochs_per_layer: 30
+    lr: 0.03
+    threshold: 2.0
+    batch_size: 512
+  eval:
+    batch_size: 512
+
+
+# ── KAN (Kolmogorov-Arnold Network con Bottleneck) ───────────
+# Capacità: ~1.76M parametri (Bottleneck lineare 3072 → 384 + KAN [384, 256, 64, 10])
+kan:
+  model:
+    input_dim: 3072          # 3×32×32 per CIFAR-10
+    num_classes: 10
+    hidden_dims: [256, 64]
+    grid_size: 5
+    direct: false
+    bottleneck_dim: 384
+    dropout: 0.2
+    use_input_norm: true
+    checkpoint_name: kan_cifar10.pt
+  train:
+    epochs: 30
+    lr: 0.003
+    batch_size: 128
+    weight_decay: 0.0001
+    regularization_lambda: 0.005
+  eval:
+    batch_size: 128
+
+
+# ── Direct KAN (Ricezione diretta vettore flatten 3072) ───────
+# Capacità: ~1.81M parametri (3072 → 64 → 64 → 10 con grid_size=5)
+direct_kan:
+  model:
+    input_dim: 3072          # 3×32×32 per CIFAR-10
+    num_classes: 10
+    hidden_dims: [64, 64]
+    grid_size: 5
+    spline_order: 3
+    dropout: 0.2
+    use_input_norm: true
+    checkpoint_name: direct_kan_cifar10.pt
+  train:
+    epochs: 30
+    lr: 0.003
+    batch_size: 128
+    weight_decay: 0.0001
+    regularization_lambda: 0.0
+  eval:
+    batch_size: 128
+
+
+# ── SNN-MLP (Spiking Neural Network – Rate Coding) ───────────
+# Capacità: ~1.71M parametri (3072 → 512 → 256 → 10 con LIF)
+snn_mlp:
+  model:
+    input_dim: 3072          # 3×32×32 per CIFAR-10
+    num_classes: 10
+    hidden_dims: [512, 256]
+    beta: 0.95
+    num_steps: 5
+    dropout: 0.2
+    checkpoint_name: snn_mlp_cifar10.pt
+  train:
+    epochs: 30
+    lr: 0.002
+    batch_size: 128
+    weight_decay: 0.0001
+    mem_weight: 1.0
+    spike_weight: 1.0
+  eval:
+    batch_size: 128
+
+
+# ── LTC (Liquid Time-Constant Network) ───────────────────────
+# Capacità: ~1.60M parametri (Proiezione 3072 → 512 + Cella LTC Fully-Connected)
+ltc:
+  model:
+    input_dim: 3072          # 3×32×32 per CIFAR-10
+    num_classes: 10
+    units: 64
+    num_steps: 8
+    dropout: 0.2
+    checkpoint_name: ltc_cifar10.pt
+  train:
+    epochs: 30
+    lr: 0.001
+    batch_size: 64
+    weight_decay: 0.0001
+  eval:
+    batch_size: 128
+
+
+# ==============================================================================
+# TRACCIA 2: PARADIGMI CONVOLUZIONALI ED IBRIDI (Backbone condiviso [32, 64, 128])
+# ==============================================================================
+
+# ── CNN Baseline (3 stadi conv standard) ─────────────────────
+# Capacità: ~95k parametri (Feature extractor condiviso + classificatore lineare diretto)
+cnn:
+  model:
+    in_channels: 3           # 3 canali RGB CIFAR-10
+    num_classes: 10
+    cnn_channels: [32, 64, 128]
+    fc_dims: []
+    dropout: 0.2
+    checkpoint_name: cnn_cifar10.pt
+  train:
+    epochs: 30
+    lr: 0.001
+    batch_size: 64
+    weight_decay: 0.0001
+  eval:
+    batch_size: 128
+
+
+# ── CNN-KAN (Backbone Convoluzionale + Classificatore KAN) ───
+# Capacità: ~173k parametri (Backbone ~93.5k + KAN [128, 64, 10] ~79.5k)
+cnn_kan:
+  model:
+    in_channels: 3           # 3 canali RGB CIFAR-10
+    num_classes: 10
+    cnn_channels: [32, 64, 128]
+    hidden_dims: [64]
+    grid_size: 5
+    spline_order: 3
+    checkpoint_name: cnn_kan_cifar10.pt
+  train:
+    epochs: 30
+    lr: 0.005
+    batch_size: 64
+    weight_decay: 0.0005
+    regularization_lambda: 0.005
+  eval:
+    batch_size: 128
+
+
+# ── CNN-LTC (Backbone Convoluzionale + Cella LTC) ────────────
+# Capacità: ~181k parametri (Backbone ~93.5k + Proiezione temporale + Cella LTC ~87.5k)
+cnn_ltc:
+  model:
+    in_channels: 3           # 3 canali RGB CIFAR-10
+    num_classes: 10
+    cnn_channels: [32, 64, 128]
+    units: 64
+    num_steps: 8
+    dropout: 0.2
+    checkpoint_name: cnn_ltc_cifar10.pt
+  train:
+    epochs: 20
+    lr: 0.001
+    batch_size: 64
+    weight_decay: 0.0001
+  eval:
+    batch_size: 128
+
+
+# ── SNN-CNN (Spiking Convolutional Neural Network) ───────────
+# Backbone convoluzionale spiking a 3 stadi + classificazione LIF
+snn_cnn:
+  model:
+    in_channels: 3           # 3 canali RGB CIFAR-10
+    num_classes: 10
+    cnn_channels: [48, 96, 160] # [48, 96, 160] per parità a ~181k parametri
+    beta: 0.95
+    num_steps: 5
+    dropout: 0.2
+    checkpoint_name: snn_cnn_cifar10.pt
+  train:
+    epochs: 30
+    lr: 0.002
+    batch_size: 64
+    weight_decay: 0.0001
+    mem_weight: 1.0
+    spike_weight: 1.0
+  eval:
+    batch_size: 128
+
+
+# ==============================================================================
+# TRACCIA 3: RESIDUAL NETWORKS (Confronto Deep Residual)
+# ==============================================================================
+
+# ── ResNet-56 (Backpropagation Standard) ─────────────────────
+# Architettura deep residual per CIFAR-10 (~855k parametri)
+resnet:
+  model:
+    in_channels: 3           # 3 canali RGB CIFAR-10
+    num_classes: 10
+    layers: [9, 9, 9]        # ResNet-56 (oppure [5, 5, 5] per ResNet-32, [3, 3, 3] per ResNet-20)
+    checkpoint_name: resnet_cifar10.pt
+  train:
+    epochs: 30
+    lr: 0.001
+    batch_size: 128
+    weight_decay: 0.0001
+  eval:
+    batch_size: 128
+
+
+# ── FF-ResNet (Forward-Forward Residual Network) ─────────────
+ff_resnet:
+  model:
+    in_channels: 3           # 3 canali RGB CIFAR-10
+    num_classes: 10
+    threshold: 1.0
+    checkpoint_name: ff_resnet_cifar10.pt
+  train:
+    epochs_per_layer: 30
+    lr: 0.001
+    batch_size: 128
+  eval:
+    batch_size: 128
+
+
+# ── SNN-ResNet (Spiking Residual Network con BPTT) ────────────
+# ResNet Spiking nativa multi-step con neuroni ParametricLIF
+snn_resnet:
+  model:
+    in_channels: 3           # 3 canali RGB CIFAR-10
+    num_classes: 10
+    layers: [3, 3, 3]        # SNN-ResNet-20 compatto
+    beta: 0.95
+    num_steps: 8
+    use_rate_coding: true
+    checkpoint_name: snn_resnet_cifar10.pt
+  train:
+    epochs: 30
+    lr: 0.001
+    batch_size: 64
+    weight_decay: 0.0001
+    mem_weight: 1.0
+    spike_weight: 1.0
+  eval:
+    batch_size: 128
+
+
+# ==============================================================================
+# TRACCIA 4: SNN NON SUPERVISIONATA (STDP) E CONVERSIONE ANN-TO-SNN
+# ==============================================================================
+
+# ── SNN-STDP (Spike-Timing Dependent Plasticity) ──────────────
+# NOTA: Per eseguire snn_stdp, impostare `normalize: false` nella sezione dataset!
+snn_stdp:
+  model:
+    input_dim: 3072          # 3×32×32 per CIFAR-10
+    hidden_neurons: 800
+    homeostasis_gain: 0.02
+    inhibition: 0.15
+    v_threshold: 0.01
+    inhibition_tau: 2.0
+    refractory_steps: 2
+    bias_initial: 0.005
+    num_steps: 75
+    checkpoint_name: snn_stdp_cifar10.pt
+  train:
+    epochs: 4
+    ltp: 0.000875
+    batch_size: 32
+    train_samples: 10000
+    calibration_samples: 2000
+  eval:
+    batch_size: 128
+    test_samples: 10000
+
+
+# ── MLP-SNN (Conversione ANN-to-SNN via SpikingJelly) ─────────
+mlp_snn:
+  model:
+    input_dim: 3072          # 3×32×32 per CIFAR-10
+    num_classes: 10
+    hidden_dims: [512, 256]
+    baseline_checkpoint: mlp_cifar10.pt
+    checkpoint_name: mlp_snn_cifar10.pt
+    num_steps: 32
+    conversion_mode: "99.9%"
+  train:
+    batch_size: 128
+  eval:
+    batch_size: 128
+
+
+# ── CNN-SNN (Conversione ANN-to-SNN via SpikingJelly) ─────────
+cnn_snn:
+  model:
+    in_channels: 3           # 3 canali RGB CIFAR-10
+    num_classes: 10
+    cnn_channels: [32, 64, 128]
+    fc_dims: []
+    dropout: 0.2
+    baseline_checkpoint: cnn_cifar10.pt
+    checkpoint_name: cnn_snn_cifar10.pt
+    num_steps: 32
+    conversion_mode: "99.9%"
+  train:
+    batch_size: 128
+  eval:
+    batch_size: 128

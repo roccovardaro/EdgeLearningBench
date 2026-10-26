@@ -1,7 +1,9 @@
 """
 Utilizza l'implementazione efficient-kan di Blealtan
 (https://github.com/Blealtan/efficient-kan) per costruire una rete KAN
-basata su B-spline, addestrata con kan standard.
+basata su B-spline. Supporta sia la modalità standard (con bottleneck
+di proiezione lineare) sia la modalità 'direct' (l'input flatten alimenta
+direttamente i layer KAN, senza bottleneck), configurabile via parametro `direct`.
 """
 
 import math
@@ -19,35 +21,43 @@ from models.training_setup import get_training_components
 
 class KANClassifier(nn.Module):
     """Wrapper attorno a efficient-kan.KAN per classificazione di immagini.
+    Supporta:
+    - direct=True: l'input flatten viene passato direttamente al primo layer KAN.
+    - direct=False: applica una proiezione lineare (bottleneck_dim) prima dei layer KAN.
     """
 
     def __init__(self, input_dim, num_classes, hidden_dims=(64, 64),
-                 grid_size=5, spline_order=3, bottleneck_dim=256,
-                 dropout=0.2):
+                 grid_size=5, spline_order=3, direct=False,
+                 bottleneck_dim=256, dropout=0.2, use_input_norm=True):
         super().__init__()
         self.input_dim = input_dim
         self.num_classes = num_classes
         self.hidden_dims = list(hidden_dims)
         self.grid_size = grid_size
         self.spline_order = spline_order
-        self.bottleneck_dim = bottleneck_dim
+        self.direct = direct or (bottleneck_dim is None)
+        self.bottleneck_dim = None if self.direct else bottleneck_dim
+        self.use_input_norm = use_input_norm
 
         # ── Pre-processing ──────────────────────────────────────
-        # LayerNorm normalizza i pixel grezzi
-        self.input_norm = nn.LayerNorm(input_dim)
+        self.input_norm = nn.LayerNorm(input_dim) if use_input_norm else nn.Identity()
 
-        # Proiezione lineare: riduce input_dim → bottleneck_dim in modo
-        # economico (parametri lineari), così i layer KAN lavorano
-        # su uno spazio compatto.
-        self.projection = nn.Linear(input_dim, bottleneck_dim)
-
-        # LayerNorm sul bottleneck: assicura che le attivazioni in ingresso
-        # al primo layer KAN siano centrate e scalate nell'intervallo ≈ [-1, 1],
-        # che è il grid_range ideale delle B-spline di efficient-kan.
-        self.proj_norm = nn.LayerNorm(bottleneck_dim)
+        if not self.direct:
+            # Proiezione lineare: riduce input_dim → bottleneck_dim in modo
+            # economico (parametri lineari), così i layer KAN lavorano
+            # su uno spazio compatto.
+            self.projection = nn.Linear(input_dim, self.bottleneck_dim)
+            self.proj_norm = nn.LayerNorm(self.bottleneck_dim)
+            nn.init.kaiming_normal_(self.projection.weight, a=math.sqrt(5))
+            nn.init.zeros_(self.projection.bias)
+            kan_in_dim = self.bottleneck_dim
+        else:
+            self.projection = None
+            self.proj_norm = None
+            kan_in_dim = input_dim
 
         # ── KAN layers ──────────────────────────────────────────
-        layers_hidden = [bottleneck_dim] + self.hidden_dims + [num_classes]
+        layers_hidden = [kan_in_dim] + self.hidden_dims + [num_classes]
         self.kan = KAN(
             layers_hidden=layers_hidden,
             grid_size=grid_size,
@@ -55,38 +65,25 @@ class KANClassifier(nn.Module):
         )
 
         # ── Normalizzazione e Dropout tra i layer KAN ───────────
-        # LayerNorm previene la deriva di scala tra layer KAN consecutivi,
-        # mantenendo le attivazioni nel dominio di supporto delle spline.
         self.hidden_norms = nn.ModuleList([nn.LayerNorm(h) for h in self.hidden_dims])
         self.dropout = nn.Dropout(p=dropout)
 
-        # Inizializzazione Kaiming per la proiezione lineare
-        nn.init.kaiming_normal_(self.projection.weight, a=math.sqrt(5))
-        nn.init.zeros_(self.projection.bias)
-
     def forward(self, x):
         """Forward pass con flatten automatico [B, C, H, W] → [B, D]."""
-
         x = x.flatten(1)
         x = self.input_norm(x)
-        x = self.projection(x)
-        x = self.proj_norm(x)
+
+        if not self.direct:
+            x = self.projection(x)
+            x = self.proj_norm(x)
+
         x = self.dropout(x)
 
-        # Passaggio sequenziale attraverso i layer KAN:
-        # Per i soli layer nascosti (escluso l'output finale) applica:
-        # 1. Skip connection (se le dimensioni coincidono) per facilitare i gradienti.
-        # 2. LayerNorm per mantenere i valori nel range [-1, 1] attivo delle B-spline.
-        # 3. Dropout per ridurre l'overfitting.
-
+        # Passaggio sequenziale attraverso i layer KAN (senza residui):
+        # Per i soli layer nascosti intermedi applica LayerNorm e Dropout
         for i, layer in enumerate(self.kan.layers):
-            res = x
             x = layer(x)
-            # Applica residual (se dimensioni compatibili), norm e dropout
-            # solo sui layer intermedi (non sull'output logits finale)
             if i < len(self.kan.layers) - 1:
-                if x.shape == res.shape:
-                    x = x + res
                 x = self.hidden_norms[i](x)
                 x = self.dropout(x)
 
@@ -100,8 +97,8 @@ class KANClassifier(nn.Module):
 # ── Factory ──────────────────────────────────────────────────────────────────
 
 def build_kan(input_dim, num_classes, hidden_dims=(64, 64),
-              grid_size=5, spline_order=3, bottleneck_dim=256,
-              dropout=0.2):
+              grid_size=5, spline_order=3, direct=False,
+              bottleneck_dim=256, dropout=0.2, use_input_norm=True):
     """Costruisce un KANClassifier con i parametri specificati."""
     model = KANClassifier(
         input_dim=input_dim,
@@ -109,36 +106,40 @@ def build_kan(input_dim, num_classes, hidden_dims=(64, 64),
         hidden_dims=hidden_dims,
         grid_size=grid_size,
         spline_order=spline_order,
+        direct=direct,
         bottleneck_dim=bottleneck_dim,
         dropout=dropout,
+        use_input_norm=use_input_norm,
     )
 
-    # Stampa il breakdown dei parametri
-    proj_params = sum(p.numel() for p in model.projection.parameters())
     kan_params = sum(p.numel() for p in model.kan.parameters())
-    norm_params = (
-        sum(p.numel() for p in model.input_norm.parameters())
-        + sum(p.numel() for p in model.proj_norm.parameters())
-        + sum(p.numel() for p in model.hidden_norms.parameters())
+    norm_params = sum(p.numel() for p in model.input_norm.parameters()) + sum(
+        p.numel() for p in model.hidden_norms.parameters()
     )
+    if not model.direct:
+        proj_params = sum(p.numel() for p in model.projection.parameters())
+        norm_params += sum(p.numel() for p in model.proj_norm.parameters())
+    else:
+        proj_params = 0
+
     total_params = sum(p.numel() for p in model.parameters())
 
-    print(f"KAN layers: {[bottleneck_dim] + list(hidden_dims) + [num_classes]}")
-    print(f"Grid size: {grid_size}, Spline order: {spline_order}")
-    print(f"Bottleneck: {input_dim} → {bottleneck_dim}, Dropout: {dropout}")
+    in_dim = input_dim if model.direct else model.bottleneck_dim
+    mode_str = "Direct (senza bottleneck)" if model.direct else f"Bottleneck ({input_dim} → {model.bottleneck_dim})"
+    print(f"KAN Mode: {mode_str}")
+    print(f"KAN layers: {[in_dim] + list(hidden_dims) + [num_classes]}")
+    print(f"Grid size: {grid_size}, Spline order: {spline_order}, Dropout: {dropout}")
     print(f"Parametri — Norm: {norm_params:,}  Proj: {proj_params:,}  "
           f"KAN: {kan_params:,}  Totale: {total_params:,}")
     return model
 
 
-
 # ── Entry point (chiamato da main.py) ────────────────────────────────────────
 
 def kan_run(args, train_loader, test_loader, profiler=None, device=None):
-    """Addestra e valuta un KAN con kan standard."""
+    """Addestra e valuta un KAN (direct o con bottleneck)."""
     # Parametri di training
     epochs = args.train.epochs
-    weight_decay = getattr(args.train, "weight_decay", 1e-4)
     reg_lambda = getattr(args.train, "regularization_lambda", 0.0)
 
     # Parametri del modello
@@ -147,8 +148,10 @@ def kan_run(args, train_loader, test_loader, profiler=None, device=None):
     hidden_dims = tuple(args.model.hidden_dims)
     grid_size = getattr(args.model, "grid_size", 5)
     spline_order = getattr(args.model, "spline_order", 3)
+    direct = getattr(args.model, "direct", False)
     bottleneck_dim = getattr(args.model, "bottleneck_dim", 256)
     dropout = getattr(args.model, "dropout", 0.2)
+    use_input_norm = getattr(args.model, "use_input_norm", True)
 
     device = get_device(device)
 
@@ -159,8 +162,10 @@ def kan_run(args, train_loader, test_loader, profiler=None, device=None):
         hidden_dims=hidden_dims,
         grid_size=grid_size,
         spline_order=spline_order,
+        direct=direct,
         bottleneck_dim=bottleneck_dim,
         dropout=dropout,
+        use_input_norm=use_input_norm,
     ).to(device)
 
     optimizer, criterion = get_training_components(
@@ -214,7 +219,8 @@ def kan_run(args, train_loader, test_loader, profiler=None, device=None):
         profiler.log_eval(train_acc, test_acc)
 
     # ── Checkpoint ──────────────────────────────────────────────
-    checkpoint_path = CHECKPOINT_DIR / args.model.checkpoint_name
+    checkpoint_name = getattr(args.model, "checkpoint_name", "kan.pt")
+    checkpoint_path = CHECKPOINT_DIR / checkpoint_name
     torch.save({
         "model_state_dict": model.state_dict(),
         "model_config": {
@@ -223,8 +229,10 @@ def kan_run(args, train_loader, test_loader, profiler=None, device=None):
             "hidden_dims": list(hidden_dims),
             "grid_size": grid_size,
             "spline_order": spline_order,
-            "bottleneck_dim": bottleneck_dim,
+            "direct": model.direct,
+            "bottleneck_dim": model.bottleneck_dim,
             "dropout": dropout,
+            "use_input_norm": use_input_norm,
         },
     }, checkpoint_path)
     print(f"Checkpoint salvato in: {checkpoint_path}")

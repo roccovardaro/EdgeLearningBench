@@ -44,7 +44,7 @@ def compute_model_macs(model: nn.Module) -> int:
     model.eval()
 
     dummy = None
-    if hasattr(model, "input_dim"):
+    if getattr(model, "input_dim", None) is not None:
         dummy = torch.zeros(2, model.input_dim, device=device)
     
     #TODO da controllare se si può eliminare
@@ -110,9 +110,11 @@ class SNNProfiler:
             self._attach_hooks(model)
 
     def _attach_hooks(self, model: nn.Module):
-        """Aggancia hook leggeri a tutti i neuroni spiking."""
         for m in model.modules():
-            if m.__class__.__name__ in ("Leaky", "Synaptic", "Alpha", "IFNode", "LIFNode", "ParametricLIFNode"):
+            if m.__class__.__name__ in (
+                "Leaky", "Synaptic", "Alpha", "IFNode", "LIFNode", "ParametricLIFNode",
+                "AdaptiveLIFNode", "_AdaptiveLIFNode", "SimpleLIFNode", "SimpleIFNode",
+            ):
                 self._has_hooks = True
                 self._hooks.append(m.register_forward_hook(self._hook_fn))
 

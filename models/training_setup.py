@@ -33,7 +33,7 @@ def get_training_components(model, args, model_type="default"):
         model: Il modello PyTorch (nn.Module).
         args: Namespace degli argomenti (args del paradigma o args.train).
         model_type: Nome del modello ('resnet', 'mlp', 'kan', 'cnn_kan',
-                    'ltc', 'cnn_ltc', 'snn_mlp', 'snn_cnn', 'ann_snn').
+                    'ltc', 'cnn_ltc', 'snn_mlp', 'snn_cnn').
     """
     train = getattr(args, "train", args)
     lr = train.lr
@@ -45,11 +45,11 @@ def get_training_components(model, args, model_type="default"):
 
     # 2. Criterion: CrossEntropy (con label smoothing se previsto) o SNNLoss
     m_type = model_type.lower()
-    if m_type in ("snn_mlp", "snn_cnn", "snn"):
+    if m_type in ("snn_mlp", "snn_cnn", "snn_resnet", "snn"):
         mem_weight = getattr(train, "mem_weight", 1.0)
         spike_weight = getattr(train, "spike_weight", 1.0)
         criterion = SNNLoss(mem_weight=mem_weight, spike_weight=spike_weight)
-    elif m_type in ("resnet", "mlp", "kan", "direct_kan", "ann_snn"):
+    elif m_type in ("resnet", "mlp", "cnn", "kan", "direct_kan"):
         criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
     else:
         criterion = nn.CrossEntropyLoss()

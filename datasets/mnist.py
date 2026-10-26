@@ -68,7 +68,7 @@ class MNISTData:
         """
         Restituisce il DataLoader per il set di training.
         """
-        return self._make_loader(self.train_dataset, shuffle=True, batch_size=self.train_batch_size)
+        return self._make_loader(self.train_dataset, shuffle=False, batch_size=self.train_batch_size)
 
     def test_dataloader(self):
         """

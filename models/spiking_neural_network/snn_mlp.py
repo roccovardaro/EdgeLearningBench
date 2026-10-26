@@ -7,7 +7,7 @@ per la codifica degli input e surrogate gradient descent per l'addestramento.
 import torch
 import torch.nn as nn
 
-from spikingjelly.activation_based import neuron, surrogate, functional
+from spikingjelly.activation_based import layer, neuron, surrogate, functional
 
 from device import get_device
 from paths import CHECKPOINT_DIR, RESULTS_DIR
@@ -19,12 +19,13 @@ from models.training_setup import get_training_components
 # ── Modello ──────────────────────────────────────────────────────────────────
 
 class SpikingMLP(nn.Module):
-    """SNN-MLP con neuroni LIF di SpikingJelly e rate coding.
+    """SNN-MLP con neuroni LIF di SpikingJelly in multi-step mode (step_mode='m') e rate coding.
 
     Architettura per blocco:
         Linear → BatchNorm1d → LIFNode → Dropout
 
-    L'input viene presentato come spike rate-coded per `num_steps` timestep.
+    L'input viene convertito in spike rate-coded ed elaborato vettorialmente
+    lungo la dimensione temporale [num_steps, B, ...].
     L'output è costituito da spike e potenziale di membrana accumulati sull'ultimo layer LIF.
     """
 
@@ -50,6 +51,8 @@ class SpikingMLP(nn.Module):
         # Surrogate gradient standard di SpikingJelly (ATan per stabilità numerica)
         spike_grad = surrogate.ATan()
 
+        self.flatten = layer.Flatten(step_mode="m")
+
         # ── Layer nascosti ──
         self.layers = nn.ModuleList()
         self.bns = nn.ModuleList()
@@ -58,30 +61,31 @@ class SpikingMLP(nn.Module):
 
         in_dim = input_dim
         for h_dim in hidden_dims:
-            self.layers.append(nn.Linear(in_dim, h_dim, bias=False))
-            self.bns.append(nn.BatchNorm1d(h_dim))
+            self.layers.append(layer.Linear(in_dim, h_dim, bias=False, step_mode="m"))
+            self.bns.append(layer.BatchNorm1d(h_dim, step_mode="m"))
             self.lif_neurons.append(
                 neuron.ParametricLIFNode(
                     init_tau=tau,
                     decay_input=False,
                     surrogate_function=spike_grad,
-                    step_mode="s",
+                    step_mode="m",
                 )
             )
-            self.dropouts.append(nn.Dropout(p=dropout))
+            self.dropouts.append(layer.Dropout(p=dropout, step_mode="m"))
             in_dim = h_dim
 
         # ── Layer di output ──
-        self.output_layer = nn.Linear(in_dim, num_classes)
+        self.output_layer = layer.Linear(in_dim, num_classes, step_mode="m")
         self.output_lif = neuron.ParametricLIFNode(
             init_tau=tau,
             decay_input=False,
             surrogate_function=spike_grad,
-            step_mode="s",
+            step_mode="m",
+            store_v_seq=True,
         )
 
     def forward(self, x):
-        """Forward pass con rate coding.
+        """Forward pass multi-step con rate coding.
 
         Args:
             x: Tensor [B, C, H, W] o [B, D].
@@ -92,33 +96,27 @@ class SpikingMLP(nn.Module):
         """
         # Reset delle membrane all'inizio di ogni inferenza/passaggio
         functional.reset_net(self)
-        x = x.flatten(1)  # [B, D]
 
-        spk_recordings = []
-        mem_recordings = []
+        # Rate coding: conversione in spike su num_steps timestep [num_steps, B, ...]
+        x_seq = x.unsqueeze(0).repeat(self.num_steps, *([1] * x.ndim))
+        rate = x_seq.clamp(0.0, 1.0)
+        cur = torch.bernoulli(rate)
 
-        for _ in range(self.num_steps):
-            # Rate coding: conversione in spike proporzionali all'intensità
-            rate = x.clamp(0.0, 1.0)
-            cur = torch.bernoulli(rate)
+        # Appiattimento spaziale multi-step [num_steps, B, D]
+        cur = self.flatten(cur)
 
-            # Propagazione attraverso i layer nascosti
-            for linear, bn, lif, drop in zip(
-                self.layers, self.bns, self.lif_neurons, self.dropouts
-            ):
-                cur = linear(cur)
-                cur = bn(cur)
-                spk = lif(cur)
-                cur = drop(spk)
+        # Propagazione multi-step attraverso i layer nascosti
+        for linear, bn, lif, drop in zip(
+            self.layers, self.bns, self.lif_neurons, self.dropouts
+        ):
+            cur = drop(lif(bn(linear(cur))))
 
-            # Layer di output
-            cur = self.output_layer(cur)
-            spk_out = self.output_lif(cur)
+        # Layer di output
+        cur = self.output_layer(cur)
+        spk_out = self.output_lif(cur)
+        mem_out = self.output_lif.v_seq
 
-            spk_recordings.append(spk_out)
-            mem_recordings.append(self.output_lif.v)
-
-        return torch.stack(spk_recordings), torch.stack(mem_recordings)
+        return spk_out, mem_out
 
 
 # ── Factory ──────────────────────────────────────────────────────────────────
