@@ -98,7 +98,7 @@ class SpikingMLP(nn.Module):
         functional.reset_net(self)
 
         # Rate coding: conversione in spike su num_steps timestep [num_steps, B, ...]
-        x_seq = x.unsqueeze(0).repeat(self.num_steps, *([1] * x.ndim))
+        x_seq = x.unsqueeze(0).repeat(self.num_steps, *([1] * x.ndim)) # lo stesso input statico viene presentato alla rete per più timestep
         rate = x_seq.clamp(0.0, 1.0)
         cur = torch.bernoulli(rate)
 

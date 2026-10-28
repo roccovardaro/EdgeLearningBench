@@ -1,7 +1,7 @@
 """
 SNN-STDP (Spiking Neural Network – Spike-Timing Dependent Plasticity) con SpikingJelly.
 
-Implementazione bio-ispirata per apprendimento non supervisionato su MNIST:
+Implementazione bio-ispirata per apprendimento non supervisionato:
 - Neuroni Leaky Integrate-and-Fire con omeostasi intrinseca (AdaptiveLIFNode)
 - Inibizione laterale ricorrente (PopulationCurrent) per competizione soft Winner-Take-All
 - Plasticità locale STDP moltiplicativa (STDPLearner) con normalizzazione sinaptica
@@ -57,10 +57,7 @@ class AdaptiveLIFNode(neuron.SimpleLIFNode):
         )
 
     def neuronal_fire(self) -> torch.Tensor:
-        return (
-            (self.v >= self.v_threshold)
-            & (torch.as_tensor(self.refractory, device=self.v.device) <= 0)
-        ).to(self.v)
+        return ((self.v >= self.v_threshold) & (torch.as_tensor(self.refractory, device=self.v.device) <= 0)).to(self.v)
 
     def neuronal_reset(self, spike: torch.Tensor) -> None:
         super().neuronal_reset(spike)
@@ -78,6 +75,7 @@ class CurrentFilter(base.MemoryModule):
         super().__init__()
         self.tau = tau
         self.register_memory("current", 0.0)
+        #states usa la corrente dal passo temporale precedente registrata in questo register memory
 
     def single_step_functional_forward(self, inputs, states, **kwargs):
         current = states[0] + (inputs[0] - states[0]) / self.tau
@@ -93,6 +91,7 @@ class PopulationCurrent(nn.Module):
         self.register_buffer("input_gain", torch.ones(neurons))
 
     def forward(self, previous: torch.Tensor, current: torch.Tensor) -> torch.Tensor:
+        """Applica inibizione laterale e contrast enhancement di popolazione."""
         if previous.shape != current.shape:
             raise ValueError("La dimensione del batch ricorrente è cambiata; reset prima dell'uso.")
         return self.input_gain * (
@@ -214,7 +213,8 @@ class SpikingSTDP(nn.Module):
         spk_records, mem_records = [], []
         for _ in range(self.num_steps):
             in_spk = encoder(probability)
-            out_spk = self.sn(self.synapse(in_spk))
+            current = self.synapse(in_spk)
+            out_spk = self.sn(current)
             spk_records.append(out_spk)
             mem_records.append(self.lif.v)
 
@@ -225,17 +225,21 @@ class SpikingSTDP(nn.Module):
         functional.reset_net(self)
         learner.reset()
         dev = self.synapse.weight.device
+
+        #Costruzione corrente costante per ciascun pixel
         x_flat = prepare_input(x).to(dev)
         prob_scale = min(0.8, max(0.01, 45.0 / self.num_steps))
         probability = x_flat * prob_scale
 
+        #Trasforma i pixel in inpulsi
         encoder = neuron.SimpleIFNode(v_threshold=1.0, v_reset=None).to(dev)
-        encoder.v = torch.rand(probability.shape, device=dev)
+        encoder.v = torch.rand(probability.shape, device=dev) #potenziale iniziale è casuale
 
         spk_records, mem_records = [], []
         for _ in range(self.num_steps):
             in_spk = encoder(probability)
-            out_spk = self.sn(self.synapse(in_spk))
+            current = self.synapse(in_spk)
+            out_spk = self.sn(current) # elabora la corrente e produce gli spike
             spk_records.append(out_spk)
             mem_records.append(self.lif.v)
 
@@ -245,7 +249,7 @@ class SpikingSTDP(nn.Module):
             weight.add_(dw).clamp_(0.0, 1.0)
             target_sum = 0.1 * self.input_dim
             weight.mul_(target_sum / weight.sum(1, keepdim=True).clamp_min(1e-12))
-            weight.clamp_(0.0, 1.0)
+            weight.clamp_(0.0, 1.0) # forza tutti i pesi nell'intervallo [0,1]
 
         self.refresh_gain()
         learner.reset()
@@ -278,11 +282,11 @@ class SpikingSTDP(nn.Module):
         for imgs, lbls in loader:
             imgs = imgs.to(dev)
             lbls = lbls.to(dev)
-            spk_out, _ = self.forward(imgs)
-            counts_list.append(spk_out.sum(dim=0))
+            spk_out, _ = self.forward(imgs) # [T,B,N]
+            counts_list.append(spk_out.sum(dim=0)) # [B,N]
             labels_list.append(lbls)
             total += len(imgs)
-            if total >= max_samples:
+            if total >= max_samples: # Interrompe la raccolta quando raggiunge abbastanza immagini (max_samples)
                 break
 
         counts = torch.cat(counts_list)[:max_samples]

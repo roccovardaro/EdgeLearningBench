@@ -244,7 +244,7 @@ resnet:
   model:
     in_channels: 3           # 3 canali RGB CIFAR-10
     num_classes: 10
-    layers: [9, 9, 9]        # ResNet-56 (oppure [5, 5, 5] per ResNet-32, [3, 3, 3] per ResNet-20)
+    layers: [3, 3, 3]        # ResNet-56 (oppure [5, 5, 5] per ResNet-32, [3, 3, 3] per ResNet-20)
     checkpoint_name: resnet_cifar10.pt
   train:
     epochs: 30
@@ -301,17 +301,17 @@ snn_resnet:
 snn_stdp:
   model:
     input_dim: 3072          # 3×32×32 per CIFAR-10
-    hidden_neurons: 800
+    hidden_neurons: 400
     homeostasis_gain: 0.02
     inhibition: 0.15
     v_threshold: 0.01
     inhibition_tau: 2.0
     refractory_steps: 2
     bias_initial: 0.005
-    num_steps: 75
+    num_steps: 50
     checkpoint_name: snn_stdp_cifar10.pt
   train:
-    epochs: 4
+    epochs: 8
     ltp: 0.000875
     batch_size: 32
     train_samples: 10000
