@@ -52,7 +52,9 @@ def main(args):
         raise ValueError(f"Paradigma '{paradigm}' non riconosciuto. Opzioni: {', '.join(_PARADIGMS)}")
 
     train_loader, test_loader = get_dataloaders(args)
-    print(f"Dataset: {args.dataset.name} | Normalization: {args.dataset.normalize} | Augmentation: {args.dataset.augmentation} | Batch size -> Train: {train_loader.batch_size}, Test: {test_loader.batch_size}")
+    aug_flag = getattr(args.dataset, "augmentation", False)
+    norm_flag = getattr(args.dataset, "normalize", True)
+    print(f"Dataset: {args.dataset.name} | Normalization: {norm_flag} | Augmentation: {aug_flag} | Batch size -> Train: {train_loader.batch_size}, Test: {test_loader.batch_size}")
     tag = f"{paradigm}_{args.dataset.name}"
 
     device = get_device(getattr(args, "device", "auto"))

@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 from device import get_device
 from paths import CHECKPOINT_DIR
-from models.metrics import accuracy
+from models.metrics import accuracy, regression_metrics
 from models.training_setup import get_training_components
 
 
@@ -85,41 +85,68 @@ def mlp_run(args, train_loader, test_loader, profiler=None, device=None):
         model, args, model_type="mlp"
     )
 
+    # Verifica se il task è di regressione (num_classes == 1)
+    is_regression = (num_classes == 1)
+
     # ── Training ────────────────────────────────────────────────
     for epoch in range(epochs):
         model.train()
         running_loss, correct, total = 0.0, 0, 0
 
         for images, labels in train_loader:
-            images, labels = images.to(device), labels.to(device)
+            images = images.to(device)
+            if is_regression:
+                labels = labels.to(device=device, dtype=torch.float32).view(-1, 1)
+            else:
+                labels = labels.to(device)
 
             optimizer.zero_grad()
             outputs = model(images)
+            if is_regression:
+                outputs = outputs.view(-1, 1)
+
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
 
             running_loss += loss.item() * labels.size(0)
-            correct += (outputs.argmax(1) == labels).sum().item()
+            if not is_regression:
+                correct += (outputs.argmax(1) == labels).sum().item()
             total += labels.size(0)
 
-        print(
-            f"Epoch {epoch + 1:3d}/{epochs} | "
-            f"loss={running_loss / total:.4f} | "
-            f"train_acc={correct / total:.4f}"
-        )
-
-        if profiler:
-            profiler.log_epoch(epoch + 1, running_loss / total, correct / total)
+        epoch_loss = running_loss / total
+        if is_regression:
+            print(
+                f"Epoch {epoch + 1:3d}/{epochs} | "
+                f"loss(MSE)={epoch_loss:.4f}"
+            )
+            if profiler:
+                profiler.log_epoch(epoch + 1, epoch_loss)
+        else:
+            train_acc = correct / total
+            print(
+                f"Epoch {epoch + 1:3d}/{epochs} | "
+                f"loss={epoch_loss:.4f} | "
+                f"train_acc={train_acc:.4f}"
+            )
+            if profiler:
+                profiler.log_epoch(epoch + 1, epoch_loss, train_acc)
 
     # ── Valutazione ─────────────────────────────────────────────
-    train_acc = accuracy(model, train_loader, device)
-    test_acc = accuracy(model, test_loader, device)
-    print(f"Train accuracy: {train_acc:.4f}  (error: {1 - train_acc:.4f})")
-    print(f"Test  accuracy: {test_acc:.4f}  (error: {1 - test_acc:.4f})")
-
-    if profiler:
-        profiler.log_eval(train_acc, test_acc)
+    if is_regression:
+        train_m = regression_metrics(model, train_loader, device)
+        test_m = regression_metrics(model, test_loader, device)
+        print(f"Train -> MSE: {train_m['mse']:.4f} | RMSE: {train_m['rmse']:.4f} | MAE: {train_m['mae']:.4f} | R²: {train_m['r2']:.4f}")
+        print(f"Test  -> MSE: {test_m['mse']:.4f} | RMSE: {test_m['rmse']:.4f} | MAE: {test_m['mae']:.4f} | R²: {test_m['r2']:.4f}")
+        if profiler:
+            profiler.log_eval(loss=test_m["mse"], acc=test_m["r2"])
+    else:
+        train_acc = accuracy(model, train_loader, device)
+        test_acc = accuracy(model, test_loader, device)
+        print(f"Train accuracy: {train_acc:.4f}  (error: {1 - train_acc:.4f})")
+        print(f"Test  accuracy: {test_acc:.4f}  (error: {1 - test_acc:.4f})")
+        if profiler:
+            profiler.log_eval(train_acc, test_acc)
 
     # ── Checkpoint ──────────────────────────────────────────────
     checkpoint_path = CHECKPOINT_DIR / args.model.checkpoint_name

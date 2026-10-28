@@ -1,0 +1,127 @@
+# ==============================================================================
+# CONFIGURAZIONE EDGELEARNINGBENCH - DATASET: UCI WINE QUALITY (REGRESSIONE)
+# ==============================================================================
+# Tipo: Dati tabellari chimico-fisici (11 feature continue)
+# Target: Qualità del vino (punteggio continuo da 0 a 10) -> Regressione (num_classes: 1)
+# Fonte: UCI Machine Learning Repository (ucimlrepo id=186)
+# Varianti supportate: both (default, 6497 campioni) | red (1599) | white (4898)
+# ==============================================================================
+
+dataset:
+  name: wine_quality
+  variant: both             # both | red | white
+  test_ratio: 0.2           # 80% train, 20% test
+  seed: 42                  # Seed per lo split riproducibile
+  normalize: true           # Standardizzazione Z-score (fit calcolato solo sul train)
+  augmentation: false
+
+# Paradigma attivo:
+# mlp | kan | direct_kan | snn_mlp | ltc
+paradigm: mlp
+
+# Dispositivo di calcolo: auto | cpu | mps | cuda | cuda:0
+device: auto
+
+
+# ==============================================================================
+# PARADIGMI COMPATIBILI (Dati tabellari 1D -> Regressione con num_classes = 1)
+# ==============================================================================
+
+# ── MLP Standard (Backpropagation) ───────────────────────────
+mlp:
+  model:
+    input_dim: 11
+    num_classes: 1          # num_classes = 1 attiva la modalità regressione (MSELoss)
+    hidden_dims: [64, 32]
+    dropout: 0.1
+    checkpoint_name: mlp_wine_quality.pt
+  train:
+    epochs: 50
+    lr: 0.005
+    batch_size: 64
+    weight_decay: 0.0001
+  eval:
+    batch_size: 64
+
+
+# ── KAN (Kolmogorov-Arnold Network con Bottleneck) ───────────
+kan:
+  model:
+    input_dim: 11
+    num_classes: 1          # num_classes = 1 attiva la modalità regressione (MSELoss)
+    hidden_dims: [16, 8]
+    grid_size: 3
+    spline_order: 3
+    direct: false
+    bottleneck_dim: 16
+    dropout: 0.1
+    use_input_norm: true
+    checkpoint_name: kan_wine_quality.pt
+  train:
+    epochs: 20
+    lr: 0.005
+    batch_size: 64
+    weight_decay: 0.001
+    regularization_lambda: 0.005
+  eval:
+    batch_size: 64
+
+
+# ── Direct KAN (Senza Bottleneck, input diretto ai layer KAN) ─
+direct_kan:
+  model:
+    input_dim: 11
+    num_classes: 1          # num_classes = 1 attiva la modalità regressione (MSELoss)
+    hidden_dims: [16, 8]
+    grid_size: 3
+    spline_order: 3
+    dropout: 0.0
+    use_input_norm: true
+    checkpoint_name: direct_kan_wine_quality.pt
+  train:
+    epochs: 20
+    lr: 0.005
+    batch_size: 64
+    weight_decay: 0.0001
+    regularization_lambda: 0.005
+  eval:
+    batch_size: 64
+
+
+# ── SNN-MLP (Spiking Neural Network con Direct Input e Leaky Integrator) ─
+snn_mlp:
+  model:
+    input_dim: 11
+    num_classes: 1          # num_classes = 1 attiva la modalità regressione (MSELoss su mem_out)
+    hidden_dims: [64, 32]
+    beta: 0.90              # Decadimento membrana (tau = 10.0)
+    num_steps: 10           # Timestep temporali
+    dropout: 0.1
+    direct_input: true      # Direct current injection per dati tabellari continui
+    checkpoint_name: snn_mlp_wine_quality.pt
+  train:
+    epochs: 30
+    lr: 0.005
+    batch_size: 64
+    weight_decay: 0.0001
+    spike_weight: 0.0       # Opzionale penalità energetica su firing rate
+  eval:
+    batch_size: 64
+
+
+# ── LTC (Liquid Time-Constant Network con dinamica ODE continua) ─
+ltc:
+  model:
+    input_dim: 11
+    num_classes: 1          # num_classes = 1 attiva la modalità regressione (MSELoss)
+    units: 32               # Neuroni nella cella LTC FullyConnected
+    num_steps: 10           # Timestep temporali sequenziali
+    dropout: 0.1
+    checkpoint_name: ltc_wine_quality.pt
+  train:
+    epochs: 25
+    lr: 0.005
+    batch_size: 64
+    weight_decay: 0.0001
+  eval:
+    batch_size: 64
