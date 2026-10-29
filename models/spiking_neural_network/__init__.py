@@ -8,14 +8,14 @@ from models.spiking_neural_network.snn_resnet import (
     snn_resnet_run,
 )
 from models.spiking_neural_network.snn_stdp import SpikingSTDP, SpikingSTDPNet, build_snn_stdp, snn_stdp_run
-from models.spiking_neural_network.mlp_snn import (
+from models.spiking_neural_network.ann_snn_conversion.mlp_snn import (
     load_mlp_from_checkpoint,
     prepare_mlp_for_snn,
     convert_mlp_to_snn,
     evaluate_mlp_snn,
     mlp_snn_run,
 )
-from models.spiking_neural_network.cnn_snn import (
+from models.spiking_neural_network.ann_snn_conversion.cnn_snn import (
     load_cnn_from_checkpoint,
     prepare_cnn_for_snn,
     convert_cnn_to_snn,

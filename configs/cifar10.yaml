@@ -37,7 +37,7 @@ mlp:
     dropout: 0.2
     checkpoint_name: mlp_cifar10.pt
   train:
-    epochs: 30
+    epochs: 20
     lr: 0.002
     batch_size: 128
     weight_decay: 0.0001
@@ -329,7 +329,7 @@ mlp_snn:
     hidden_dims: [512, 256]
     baseline_checkpoint: mlp_cifar10.pt
     checkpoint_name: mlp_snn_cifar10.pt
-    num_steps: 32
+    num_steps: 64
     conversion_mode: "99.9%"
   train:
     batch_size: 128
@@ -347,7 +347,7 @@ cnn_snn:
     dropout: 0.2
     baseline_checkpoint: cnn_cifar10.pt
     checkpoint_name: cnn_snn_cifar10.pt
-    num_steps: 32
+    num_steps: 64
     conversion_mode: "99.9%"
   train:
     batch_size: 128

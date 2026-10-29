@@ -59,7 +59,6 @@ def get_dataloaders(args):
         "wdbc",
         "cancer",
     ):
-        variant = getattr(args.dataset, "variant", "diagnostic")
         test_ratio = getattr(args.dataset, "test_ratio", 0.2)
         seed = getattr(args.dataset, "seed", 42)
         stratified = getattr(args.dataset, "stratified", True)
@@ -67,7 +66,6 @@ def get_dataloaders(args):
             batch_size=train_bs,
             train_batch_size=train_bs,
             test_batch_size=eval_bs,
-            variant=variant,
             test_ratio=test_ratio,
             seed=seed,
             normalize=normalize,

@@ -16,8 +16,8 @@ from models.spiking_neural_network.snn_mlp import snn_mlp_run
 from models.spiking_neural_network.snn_cnn import snn_cnn_run
 from models.spiking_neural_network.snn_resnet import snn_resnet_run
 from models.spiking_neural_network.snn_stdp import snn_stdp_run
-from models.spiking_neural_network.mlp_snn import mlp_snn_run
-from models.spiking_neural_network.cnn_snn import cnn_snn_run
+from models.spiking_neural_network.ann_snn_conversion.mlp_snn import mlp_snn_run
+from models.spiking_neural_network.ann_snn_conversion.cnn_snn import cnn_snn_run
 from models.ltc.ltc import ltc_run
 from models.ltc.cnn_ltc import cnn_ltc_run
 

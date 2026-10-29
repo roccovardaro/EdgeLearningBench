@@ -1,18 +1,14 @@
 # ==============================================================================
-# CONFIGURAZIONE EDGELEARNINGBENCH - DATASET: BREAST CANCER WISCONSIN (CLASSIFICAZIONE)
+# CONFIGURAZIONE EDGELEARNINGBENCH - DATASET: BREAST CANCER WISCONSIN DIAGNOSTIC (CLASSIFICAZIONE)
 # ==============================================================================
 # Tipo: Dati tabellari clinico-biologici per classificazione binaria (num_classes: 2)
-# Fonte: UCI Machine Learning Repository (ucimlrepo)
-# Varianti supportate:
-#   - diagnostic (default, UCI id=17, 30 feature continue, 569 campioni)
-#     Target: 'Diagnosis' (0 = Benigno [B], 1 = Maligno [M])
-#   - original (UCI id=15, 9 feature cliniche intere, 699 campioni)
-#     Target: 'Class' (0 = Benigno [2], 1 = Maligno [4])
+# Fonte: UCI Machine Learning Repository (ucimlrepo, id=17 - WDBC)
+# Dimensione: 569 campioni, 30 feature continue (misure nucleari da biopsia FNA)
+# Target: 'Diagnosis' (0 = Benigno [B], 1 = Maligno [M])
 # ==============================================================================
 
 dataset:
   name: breast_cancer
-  variant: diagnostic       # diagnostic (30 feature) | original (9 feature)
   test_ratio: 0.2           # 80% train, 20% test
   seed: 42                  # Seed per lo split riproducibile
   stratified: true          # Split stratificato per bilanciamento classi
@@ -28,14 +24,13 @@ device: auto
 
 
 # ==============================================================================
-# PARADIGMI COMPATIBILI (Dati tabellari 1D -> Classificazione binaria num_classes = 2)
-# NOTA: Per la variante 'original', impostare input_dim: 9
+# PARADIGMI COMPATIBILI (Dati tabellari 1D -> Classificazione binaria num_classes = 2, input_dim = 30)
 # ==============================================================================
 
 # ── MLP Standard (Backpropagation) ───────────────────────────
 mlp:
   model:
-    input_dim: 30           # 30 per diagnostic, 9 per original
+    input_dim: 30           # 30 feature continue
     num_classes: 2
     hidden_dims: [64, 32]
     dropout: 0.2
