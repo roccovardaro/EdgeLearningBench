@@ -46,8 +46,7 @@ def compute_model_macs(model: nn.Module) -> int:
     dummy = None
     if getattr(model, "input_dim", None) is not None:
         dummy = torch.zeros(2, model.input_dim, device=device)
-    
-    #TODO da controllare se si può eliminare
+
     else:
         for m in model.modules():
             if isinstance(m, nn.Conv2d):

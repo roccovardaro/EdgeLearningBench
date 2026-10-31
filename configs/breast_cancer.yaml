@@ -142,3 +142,23 @@ ff_mlp:
     batch_size: 32
   eval:
     batch_size: 32
+
+
+
+# ── CHL (Contrastive Hebbian Learning Ricorrente) ───────────────
+chl:
+  model:
+    input_dim: 30
+    num_classes: 2
+    hidden_dims: [32]
+    gamma: 0.2
+    t_free: 15
+    t_clamped: 15
+    tol: 0.0001
+    checkpoint_name: chl_breast_cancer.pt
+  train:
+    epochs: 20
+    lr: 0.05
+    batch_size: 32
+  eval:
+    batch_size: 32

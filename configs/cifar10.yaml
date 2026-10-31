@@ -148,6 +148,26 @@ ltc:
     batch_size: 128
 
 
+
+# ── CHL (Contrastive Hebbian Learning Ricorrente) ───────────────
+chl:
+  model:
+    input_dim: 3072
+    num_classes: 10
+    hidden_dims: [512,256]
+    gamma: 0.1
+    t_free: 20
+    t_clamped: 20
+    tol: 0.0001
+    checkpoint_name: chl_cifar10.pt
+  train:
+    epochs: 15
+    lr: 0.02
+    batch_size: 128
+  eval:
+    batch_size: 128
+
+
 # ==============================================================================
 # TRACCIA 2: PARADIGMI CONVOLUZIONALI ED IBRIDI (Backbone condiviso [32, 64, 128])
 # ==============================================================================
@@ -232,6 +252,7 @@ snn_cnn:
     spike_weight: 1.0
   eval:
     batch_size: 128
+
 
 
 # ==============================================================================
@@ -329,7 +350,7 @@ mlp_snn:
     hidden_dims: [512, 256]
     baseline_checkpoint: mlp_cifar10.pt
     checkpoint_name: mlp_snn_cifar10.pt
-    num_steps: 64
+    num_steps: 2
     conversion_mode: "99.9%"
   train:
     batch_size: 128
@@ -347,7 +368,7 @@ cnn_snn:
     dropout: 0.2
     baseline_checkpoint: cnn_cifar10.pt
     checkpoint_name: cnn_snn_cifar10.pt
-    num_steps: 64
+    num_steps: 32
     conversion_mode: "99.9%"
   train:
     batch_size: 128

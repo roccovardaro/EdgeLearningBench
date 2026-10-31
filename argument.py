@@ -3,6 +3,15 @@ from pathlib import Path
 from types import SimpleNamespace
 import yaml
 
+DATASET_MAP = {
+    "mnist": "configs/mnist.yaml",
+    "cifar10": "configs/cifar10.yaml",
+    "fashion_mnist": "configs/fashion_mnist.yaml",
+    "adult": "configs/adult.yaml",
+    "breast_cancer": "configs/breast_cancer.yaml",
+    "wine_quality": "configs/wine_quality.yaml",
+}
+
 
 def to_namespace(value):
     if isinstance(value, dict):
@@ -16,13 +25,30 @@ def to_namespace(value):
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="configs/mnist.yaml")
+    parser.add_argument(
+        "--dataset",
+        default="mnist",
+        help=f"Nome del dataset ({', '.join(DATASET_MAP.keys())}) o percorso del file .yaml (default: mnist)",
+    )
     parser.add_argument("--profiler_config", default="configs/profiler.yaml")
     parser.add_argument("--device", default=None, help="Dispositivo di calcolo (cpu, mps, cuda, auto)")
     parser.add_argument("--paradigm", default=None, help="Paradigma di calcolo/modello")
     cli_args = parser.parse_args()
 
-    with open(cli_args.config, encoding="utf-8") as file:
+    config_path = DATASET_MAP.get(cli_args.dataset, cli_args.dataset)
+    config_file = Path(config_path)
+
+    if not config_file.is_file():
+        candidate = Path("configs") / f"{cli_args.dataset}.yaml"
+        if candidate.is_file():
+            config_file = candidate
+        else:
+            raise FileNotFoundError(
+                f"Dataset '{cli_args.dataset}' non trovato. "
+                f"Scegli tra {list(DATASET_MAP.keys())} oppure specifica un percorso valido."
+            )
+
+    with open(config_file, encoding="utf-8") as file:
         config = yaml.safe_load(file) or {}
 
     profiler_path = Path(cli_args.profiler_config)

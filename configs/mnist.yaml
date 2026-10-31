@@ -10,11 +10,12 @@
 dataset:
   name: mnist               # mnist | fashion_mnist | cifar10
   augmentation: false       # false di default per cifre; true applica RandomCrop(28, pad=2) + RandomRotation(10)
-  normalize: true           # Normalizzazione Z-score; impostare a false esclusivamente se si esegue snn_stdp
+  normalize: false           # Normalizzazione Z-score; impostare a false esclusivamente se si esegue snn_stdp
 
 # Paradigma attivo:
 # ff_mlp | ff_resnet | resnet | cnn | kan | direct_kan | mlp | cnn_kan |
-# snn_mlp | snn_cnn | snn_resnet | snn_stdp | mlp_snn | cnn_snn | ltc | cnn_ltc
+# snn_mlp | snn_cnn | snn_resnet | snn_stdp | mlp_snn | cnn_snn | ltc | cnn_ltc |
+# chl
 paradigm: cnn
 
 # Dispositivo di calcolo: auto | cpu | mps | cuda | cuda:0
@@ -40,6 +41,7 @@ mlp:
     weight_decay: 0.0001
   eval:
     batch_size: 128
+
 
 
 # ── FF-MLP (Forward-Forward Hinton) ──────────────────────────
@@ -81,6 +83,7 @@ kan:
     batch_size: 128
 
 
+
 # ── Direct KAN (Ricezione diretta vettore flatten 784) ───────
 direct_kan:
   model:
@@ -100,6 +103,7 @@ direct_kan:
     regularization_lambda: 0.0
   eval:
     batch_size: 128
+
 
 
 # ── SNN-MLP (Spiking Neural Network – Rate Coding) ───────────
@@ -123,6 +127,7 @@ snn_mlp:
     batch_size: 128
 
 
+
 # ── LTC (Liquid Time-Constant Network) ───────────────────────
 ltc:
   model:
@@ -139,6 +144,27 @@ ltc:
     weight_decay: 0.0001
   eval:
     batch_size: 128
+
+
+
+# ── CHL (Contrastive Hebbian Learning Ricorrente) ───────────────
+chl:
+  model:
+    input_dim: 784
+    num_classes: 10
+    hidden_dims: [128]
+    gamma: 0.2
+    t_free: 20
+    t_clamped: 20
+    tol: 0.0001
+    checkpoint_name: chl_mnist.pt
+  train:
+    epochs: 10
+    lr: 0.05
+    batch_size: 128
+  eval:
+    batch_size: 128
+
 
 
 # ==============================================================================
@@ -163,6 +189,7 @@ cnn:
     batch_size: 128
 
 
+
 # ── CNN-KAN (Backbone Convoluzionale + Classificatore KAN) ───
 cnn_kan:
   model:
@@ -183,6 +210,7 @@ cnn_kan:
     batch_size: 128
 
 
+
 # ── CNN-LTC (Backbone Convoluzionale + Cella LTC) ────────────
 cnn_ltc:
   model:
@@ -200,6 +228,7 @@ cnn_ltc:
     weight_decay: 0.0001
   eval:
     batch_size: 128
+
 
 
 # ── SNN-CNN (Spiking Convolutional Neural Network) ───────────
@@ -223,6 +252,7 @@ snn_cnn:
     batch_size: 128
 
 
+
 # ==============================================================================
 # TRACCIA 3: RESIDUAL NETWORKS (Confronto Deep Residual)
 # ==============================================================================
@@ -243,6 +273,7 @@ resnet:
     batch_size: 128
 
 
+
 # ── FF-ResNet (Forward-Forward Residual Network) ─────────────
 ff_resnet:
   model:
@@ -256,6 +287,7 @@ ff_resnet:
     batch_size: 128
   eval:
     batch_size: 128
+
 
 
 # ── SNN-ResNet (Spiking Residual Network) ─────────────────────
@@ -279,6 +311,7 @@ snn_resnet:
     batch_size: 128
 
 
+
 # ==============================================================================
 # TRACCIA 4: SNN NON SUPERVISIONATA (STDP) E CONVERSIONE ANN-TO-SNN
 # ==============================================================================
@@ -288,14 +321,14 @@ snn_resnet:
 snn_stdp:
   model:
     input_dim: 784
-    hidden_neurons: 800
+    hidden_neurons: 400
     homeostasis_gain: 0.02
     inhibition: 0.15
     v_threshold: 0.01
     inhibition_tau: 2.0
     refractory_steps: 2
     bias_initial: 0.005
-    num_steps: 75
+    num_steps: 32
     checkpoint_name: snn_stdp_mnist.pt
   train:
     epochs: 4
@@ -305,6 +338,7 @@ snn_stdp:
     calibration_samples: 2000
   eval:
     batch_size: 128
+
     test_samples: 10000
 
 
@@ -316,12 +350,13 @@ mlp_snn:
     hidden_dims: [512, 256]
     baseline_checkpoint: mlp_mnist.pt
     checkpoint_name: mlp_snn_mnist.pt
-    num_steps: 32
+    num_steps: 4
     conversion_mode: "99.9%"
   train:
     batch_size: 128
   eval:
     batch_size: 128
+
 
 
 # ── CNN-SNN (Conversione ANN-to-SNN via SpikingJelly) ─────────
@@ -340,3 +375,4 @@ cnn_snn:
     batch_size: 128
   eval:
     batch_size: 128
+

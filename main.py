@@ -20,6 +20,7 @@ from models.spiking_neural_network.ann_snn_conversion.mlp_snn import mlp_snn_run
 from models.spiking_neural_network.ann_snn_conversion.cnn_snn import cnn_snn_run
 from models.ltc.ltc import ltc_run
 from models.ltc.cnn_ltc import cnn_ltc_run
+from models.hebbian.chl import chl_run
 
 _PARADIGMS = {
     "ff_mlp": ff_mlp_run,
@@ -38,6 +39,7 @@ _PARADIGMS = {
     "cnn_snn": cnn_snn_run,
     "ltc": ltc_run,
     "cnn_ltc": cnn_ltc_run,
+    "chl": chl_run,
 }
 
 

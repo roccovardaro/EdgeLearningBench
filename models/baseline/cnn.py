@@ -23,6 +23,7 @@ class ConvBlock(nn.Module):
 
     def __init__(self, in_channels: int, out_channels: int, kernel_size: int = 3, pool_size: int = 2):
         super().__init__()
+
         self.conv = nn.Conv2d(
             in_channels,
             out_channels,

@@ -28,14 +28,12 @@ class WineQualityData:
 
     Include le 11 feature chimico-fisiche in input e la variabile continua
     'quality' come target (num_classes=1).
-    Supporta la suddivisione per variante ('red', 'white', 'both') e la
-    standardizzazione Z-score (fit calcolato solo sul training set).
+    Supporta la standardizzazione Z-score (fit calcolato solo sul training set).
     """
 
     def __init__(
         self,
         root=None,
-        variant="both",
         test_ratio=0.2,
         seed=42,
         normalize=True,
@@ -45,7 +43,6 @@ class WineQualityData:
         num_workers=0,
     ):
         self.root = Path(root) if root else (DATA_DIR / "wine_quality")
-        self.variant = variant.lower() if variant else "both"
         self.test_ratio = test_ratio
         self.seed = seed
         self.normalize = normalize
@@ -78,13 +75,6 @@ class WineQualityData:
         df.columns = [c.strip().replace(" ", "_") for c in df.columns]
         if "ph" in df.columns and "pH" not in df.columns:
             df = df.rename(columns={"ph": "pH"})
-
-        # Filtro per variante se richiesto ('red', 'white', 'both')
-        if "color" in df.columns:
-            if self.variant == "red":
-                df = df[df["color"].astype(str).str.lower() == "red"]
-            elif self.variant == "white":
-                df = df[df["color"].astype(str).str.lower() == "white"]
 
         X = df[FEATURE_COLS].to_numpy(dtype=np.float32)
         y = df[[TARGET_COL]].to_numpy(dtype=np.float32)
@@ -138,7 +128,6 @@ def wine_quality_dataloaders(
     batch_size=64,
     train_batch_size=None,
     test_batch_size=None,
-    variant="both",
     test_ratio=0.2,
     seed=42,
     normalize=True,
@@ -148,7 +137,6 @@ def wine_quality_dataloaders(
     """Crea e restituisce i DataLoader (train, test) per il dataset Wine Quality."""
     wine = WineQualityData(
         root=root,
-        variant=variant,
         test_ratio=test_ratio,
         seed=seed,
         normalize=normalize,

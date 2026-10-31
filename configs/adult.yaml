@@ -150,3 +150,23 @@ ff_mlp:
   eval:
     batch_size: 256
 
+
+
+# ── CHL (Contrastive Hebbian Learning Ricorrente) ───────────────
+chl:
+  model:
+    input_dim: 108
+    num_classes: 2
+    hidden_dims: [64]
+    gamma: 0.2
+    t_free: 15
+    t_clamped: 15
+    tol: 0.0001
+    checkpoint_name: chl_adult.pt
+  train:
+    epochs: 15
+    lr: 0.05
+    batch_size: 128
+  eval:
+    batch_size: 256
+

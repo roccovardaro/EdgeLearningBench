@@ -4,12 +4,10 @@
 # Tipo: Dati tabellari chimico-fisici (11 feature continue)
 # Target: Qualità del vino (punteggio continuo da 0 a 10) -> Regressione (num_classes: 1)
 # Fonte: UCI Machine Learning Repository (ucimlrepo id=186)
-# Varianti supportate: both (default, 6497 campioni) | red (1599) | white (4898)
 # ==============================================================================
 
 dataset:
   name: wine_quality
-  variant: both             # both | red | white
   test_ratio: 0.2           # 80% train, 20% test
   seed: 42                  # Seed per lo split riproducibile
   normalize: true           # Standardizzazione Z-score (fit calcolato solo sul train)
@@ -32,7 +30,7 @@ mlp:
   model:
     input_dim: 11
     num_classes: 1          # num_classes = 1 attiva la modalità regressione (MSELoss)
-    hidden_dims: [64, 32]
+    hidden_dims: [16,8]
     dropout: 0.1
     checkpoint_name: mlp_wine_quality.pt
   train:
@@ -93,7 +91,7 @@ snn_mlp:
   model:
     input_dim: 11
     num_classes: 1          # num_classes = 1 attiva la modalità regressione (MSELoss su mem_out)
-    hidden_dims: [64, 32]
+    hidden_dims: [32, 16]
     beta: 0.90              # Decadimento membrana (tau = 10.0)
     num_steps: 10           # Timestep temporali
     dropout: 0.1
@@ -119,9 +117,10 @@ ltc:
     dropout: 0.1
     checkpoint_name: ltc_wine_quality.pt
   train:
-    epochs: 25
+    epochs: 20
     lr: 0.005
     batch_size: 64
     weight_decay: 0.0001
   eval:
     batch_size: 64
+
