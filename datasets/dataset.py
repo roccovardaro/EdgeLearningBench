@@ -38,7 +38,6 @@ def get_dataloaders(args):
             normalize=normalize,
         )
     if dataset_name in "wine_quality":
-        variant = getattr(args.dataset, "variant", "both")
         test_ratio = getattr(args.dataset, "test_ratio", 0.2)
         seed = getattr(args.dataset, "seed", 42)
         return wine_quality_dataloaders(

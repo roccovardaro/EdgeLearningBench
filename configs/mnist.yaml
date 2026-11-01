@@ -238,11 +238,11 @@ snn_cnn:
     num_classes: 10
     cnn_channels: [32, 64, 128]
     beta: 0.95
-    num_steps: 8
+    num_steps: 4
     dropout: 0.2
     checkpoint_name: snn_cnn_mnist.pt
   train:
-    epochs: 15
+    epochs: 10
     lr: 0.002
     batch_size: 128
     weight_decay: 0.0001
@@ -279,6 +279,7 @@ ff_resnet:
   model:
     in_channels: 1
     num_classes: 10
+    layers: [3, 3, 3]          # FF-ResNet-20
     threshold: 1.0
     checkpoint_name: ff_resnet_mnist.pt
   train:

@@ -270,6 +270,7 @@ ff_resnet:
   model:
     in_channels: 1
     num_classes: 10
+    layers: [3, 3, 3]          # FF-ResNet-20
     threshold: 1.0
     checkpoint_name: ff_resnet_fashion_mnist.pt
   train:

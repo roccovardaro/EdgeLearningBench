@@ -123,7 +123,7 @@ class FFConvBlock(nn.Module):
 class FFResNet(nn.Module):
     def __init__(self, num_classes, in_channels=3, layers=None, threshold=2.0):
         super().__init__()
-        layers = list(layers) if layers is not None else [2, 2, 2]
+        layers = list(layers) if layers is not None else [3, 3, 3]
         if len(layers) != 3 or any(not isinstance(n, int) or n < 1 for n in layers):
             raise ValueError("layers deve contenere tre interi positivi")
         if num_classes < 2 or in_channels < 1 or threshold <= 0:
@@ -271,18 +271,21 @@ class FFResNet(nn.Module):
         return self
 
 
-
 def ff_resnet_run(args, train_loader, test_loader, profiler=None, device=None):
     device = get_device(device)
+    layers = list(getattr(args.model, "layers", [3, 3, 3]))
+    depth = sum(layers) * 2 + 2
+    model_name = f"FF-ResNet-{depth}"
+
     model_config = {
         "num_classes": args.model.num_classes,
         "in_channels": args.model.in_channels,
         "threshold": args.model.threshold,
-        "layers": [4, 4, 4],
+        "layers": layers,
     }
     model = FFResNet(**model_config)
     total_params = sum(p.numel() for p in model.parameters())
-    print(f"FF-ResNet layers: {model_config['layers']} | in_channels={model_config['in_channels']} | classes={model_config['num_classes']}")
+    print(f"FF-ResNet layers: {layers} ({model_name}) | in_channels={model_config['in_channels']} | classes={model_config['num_classes']}")
     print(f"Threshold: {model_config['threshold']}")
     print(f"Parametri totali: {total_params:,}")
 

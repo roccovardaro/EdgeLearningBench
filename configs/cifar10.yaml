@@ -281,6 +281,7 @@ ff_resnet:
   model:
     in_channels: 3           # 3 canali RGB CIFAR-10
     num_classes: 10
+    layers: [3, 3, 3]        # FF-ResNet-20 (oppure [5, 5, 5] per FF-ResNet-32, [9, 9, 9] per FF-ResNet-56)
     threshold: 1.0
     checkpoint_name: ff_resnet_cifar10.pt
   train:
