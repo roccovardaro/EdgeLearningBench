@@ -12,7 +12,7 @@ from spikingjelly.activation_based import layer, neuron, surrogate, functional
 from device import get_device
 from paths import CHECKPOINT_DIR, RESULTS_DIR
 from profiler.snn_profiler import SNNProfiler
-from models.metrics import accuracy, regression_metrics
+from models.metrics import accuracy
 from models.training_setup import get_training_components
 
 
@@ -44,8 +44,7 @@ class SpikingMLP(nn.Module):
         self.num_classes = num_classes
         self.num_steps = num_steps
         self.beta = beta
-        # Se num_classes == 1 (regressione), abilitiamo direct_input di default
-        self.direct_input = direct_input if direct_input is not None else (num_classes == 1)
+        self.direct_input = bool(direct_input) if direct_input is not None else False
 
         # Relazione tau e decadimento beta: tau = 1 / (1 - beta)
         tau = 1.0 / (1.0 - beta) if (beta is not None and beta < 1.0) else 20.0
@@ -79,24 +78,13 @@ class SpikingMLP(nn.Module):
 
         # ── Layer di output ──
         self.output_layer = layer.Linear(in_dim, num_classes, step_mode="m")
-        if self.num_classes == 1:
-            # Per regressione: Leaky Integrator senza reset continuo
-            self.output_lif = neuron.ParametricLIFNode(
-                init_tau=tau,
-                decay_input=False,
-                v_reset=None,
-                v_threshold=1e9,
-                step_mode="m",
-                store_v_seq=True,
-            )
-        else:
-            self.output_lif = neuron.ParametricLIFNode(
-                init_tau=tau,
-                decay_input=False,
-                surrogate_function=spike_grad,
-                step_mode="m",
-                store_v_seq=True,
-            )
+        self.output_lif = neuron.ParametricLIFNode(
+            init_tau=tau,
+            decay_input=False,
+            surrogate_function=spike_grad,
+            step_mode="m",
+            store_v_seq=True,
+        )
 
     def forward(self, x):
         """Forward pass multi-step con rate coding o direct input.
@@ -198,20 +186,13 @@ def snn_mlp_run(args, train_loader, test_loader, profiler=None, device=None):
     )
     snn_prof = SNNProfiler(model=model, tag="snn_mlp", output_dir=RESULTS_DIR)
 
-    # Verifica se il task è di regressione (num_classes == 1)
-    is_regression = (num_classes == 1)
-
     # ── Training ────────────────────────────────────────────────
     for epoch in range(epochs):
         model.train()
         running_loss, correct, total = 0.0, 0, 0
 
         for images, labels in train_loader:
-            images = images.to(device)
-            if is_regression:
-                labels = labels.to(device=device, dtype=torch.float32).view(-1, 1)
-            else:
-                labels = labels.to(device)
+            images, labels = images.to(device), labels.to(device)
 
             optimizer.zero_grad()
             spk_out, mem_out = model(images)
@@ -226,56 +207,35 @@ def snn_mlp_run(args, train_loader, test_loader, profiler=None, device=None):
 
             running_loss += loss.item() * labels.size(0)
 
-            if not is_regression:
-                mem_avg = mem_out.mean(dim=0).detach()
-                correct += (mem_avg.argmax(1) == labels).sum().item()
+            mem_avg = mem_out.mean(dim=0).detach()
+            correct += (mem_avg.argmax(1) == labels).sum().item()
             total += labels.size(0)
 
             snn_prof.update(spk_out)
 
         epoch_loss = running_loss / total
-        if is_regression:
-            print(
-                f"Epoch {epoch + 1:3d}/{epochs} | "
-                f"loss(MSE)={epoch_loss:.4f}"
-            )
-            if profiler:
-                profiler.log_epoch(epoch + 1, epoch_loss)
-        else:
-            train_acc = correct / total
-            print(
-                f"Epoch {epoch + 1:3d}/{epochs} | "
-                f"loss={epoch_loss:.4f} | "
-                f"train_acc={train_acc:.4f}"
-            )
-            if profiler:
-                profiler.log_epoch(epoch + 1, epoch_loss, train_acc)
+        train_acc = correct / total
+        print(
+            f"Epoch {epoch + 1:3d}/{epochs} | "
+            f"loss={epoch_loss:.4f} | "
+            f"train_acc={train_acc:.4f}"
+        )
+        if profiler:
+            profiler.log_epoch(epoch + 1, epoch_loss, train_acc)
 
         snn_prof.log_epoch(epoch + 1)
 
     # ── Valutazione ─────────────────────────────────────────────
-    if is_regression:
-        train_m = regression_metrics(model, train_loader, device)
-        snn_prof.reset()
-        test_m = regression_metrics(model, test_loader, device)
-        snn_prof.log_epoch("test", tag="test")
+    train_acc = accuracy(model, train_loader, device)
+    snn_prof.reset()
+    test_acc = accuracy(model, test_loader, device)
+    snn_prof.log_epoch("test", tag="test")
 
-        print(f"Train -> MSE: {train_m['mse']:.4f} | RMSE: {train_m['rmse']:.4f} | MAE: {train_m['mae']:.4f} | R²: {train_m['r2']:.4f}")
-        print(f"Test  -> MSE: {test_m['mse']:.4f} | RMSE: {test_m['rmse']:.4f} | MAE: {test_m['mae']:.4f} | R²: {test_m['r2']:.4f}")
+    print(f"Train accuracy: {train_acc:.4f}  (error: {1 - train_acc:.4f})")
+    print(f"Test  accuracy: {test_acc:.4f}  (error: {1 - test_acc:.4f})")
 
-        if profiler:
-            profiler.log_eval(loss=test_m["mse"], acc=test_m["r2"])
-    else:
-        train_acc = accuracy(model, train_loader, device)
-        snn_prof.reset()
-        test_acc = accuracy(model, test_loader, device)
-        snn_prof.log_epoch("test", tag="test")
-
-        print(f"Train accuracy: {train_acc:.4f}  (error: {1 - train_acc:.4f})")
-        print(f"Test  accuracy: {test_acc:.4f}  (error: {1 - test_acc:.4f})")
-
-        if profiler:
-            profiler.log_eval(train_acc, test_acc)
+    if profiler:
+        profiler.log_eval(train_acc, test_acc)
 
     snn_prof.print_summary()
     snn_prof.export_csv()
@@ -294,14 +254,9 @@ def snn_mlp_run(args, train_loader, test_loader, profiler=None, device=None):
             "dropout": dropout,
             "backend": "spikingjelly",
         },
+        "train_accuracy": train_acc,
+        "test_accuracy": test_acc,
     }
-    if is_regression:
-        checkpoint_data["test_mse"] = test_m["mse"]
-        checkpoint_data["test_r2"] = test_m["r2"]
-    else:
-        checkpoint_data["train_accuracy"] = train_acc
-        checkpoint_data["test_accuracy"] = test_acc
-
     torch.save(checkpoint_data, checkpoint_path)
     print(f"Checkpoint salvato in: {checkpoint_path}")
 

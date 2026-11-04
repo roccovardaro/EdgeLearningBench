@@ -40,6 +40,7 @@ def get_dataloaders(args):
     if dataset_name in "wine_quality":
         test_ratio = getattr(args.dataset, "test_ratio", 0.2)
         seed = getattr(args.dataset, "seed", 42)
+        stratified = getattr(args.dataset, "stratified", True)
         return wine_quality_dataloaders(
             batch_size=train_bs,
             train_batch_size=train_bs,
@@ -47,6 +48,7 @@ def get_dataloaders(args):
             test_ratio=test_ratio,
             seed=seed,
             normalize=normalize,
+            stratified=stratified,
         )
     if dataset_name in "breast_cancer":
         test_ratio = getattr(args.dataset, "test_ratio", 0.2)

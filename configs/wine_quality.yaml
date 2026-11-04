@@ -1,8 +1,8 @@
 # ==============================================================================
-# CONFIGURAZIONE EDGELEARNINGBENCH - DATASET: UCI WINE QUALITY (REGRESSIONE)
+# CONFIGURAZIONE EDGELEARNINGBENCH - DATASET: UCI WINE QUALITY (CLASSIFICAZIONE MULTICLASSE)
 # ==============================================================================
 # Tipo: Dati tabellari chimico-fisici (11 feature continue)
-# Target: Qualità del vino (punteggio continuo da 0 a 10) -> Regressione (num_classes: 1)
+# Target: Qualità del vino (7 classi: punteggi da 3 a 9 mappati su 0-6) -> num_classes: 7
 # Fonte: UCI Machine Learning Repository (ucimlrepo id=186)
 # ==============================================================================
 
@@ -10,11 +10,12 @@ dataset:
   name: wine_quality
   test_ratio: 0.2           # 80% train, 20% test
   seed: 42                  # Seed per lo split riproducibile
+  stratified: true          # Split stratificato per bilanciamento classi
   normalize: true           # Standardizzazione Z-score (fit calcolato solo sul train)
   augmentation: false
 
 # Paradigma attivo:
-# mlp | kan | direct_kan | snn_mlp | ltc
+# mlp | kan | direct_kan | snn_mlp | ltc | ff_mlp | chl
 paradigm: mlp
 
 # Dispositivo di calcolo: auto | cpu | mps | cuda | cuda:0
@@ -22,15 +23,15 @@ device: auto
 
 
 # ==============================================================================
-# PARADIGMI COMPATIBILI (Dati tabellari 1D -> Regressione con num_classes = 1)
+# PARADIGMI COMPATIBILI (Dati tabellari 1D -> Classificazione multiclasse num_classes = 7)
 # ==============================================================================
 
 # ── MLP Standard (Backpropagation) ───────────────────────────
 mlp:
   model:
     input_dim: 11
-    num_classes: 1          # num_classes = 1 attiva la modalità regressione (MSELoss)
-    hidden_dims: [16,8]
+    num_classes: 7
+    hidden_dims: [64, 32]
     dropout: 0.1
     checkpoint_name: mlp_wine_quality.pt
   train:
@@ -46,7 +47,7 @@ mlp:
 kan:
   model:
     input_dim: 11
-    num_classes: 1          # num_classes = 1 attiva la modalità regressione (MSELoss)
+    num_classes: 7
     hidden_dims: [16, 8]
     grid_size: 3
     spline_order: 3
@@ -69,7 +70,7 @@ kan:
 direct_kan:
   model:
     input_dim: 11
-    num_classes: 1          # num_classes = 1 attiva la modalità regressione (MSELoss)
+    num_classes: 7
     hidden_dims: [16, 8]
     grid_size: 3
     spline_order: 3
@@ -86,11 +87,11 @@ direct_kan:
     batch_size: 64
 
 
-# ── SNN-MLP (Spiking Neural Network con Direct Input e Leaky Integrator) ─
+# ── SNN-MLP (Spiking Neural Network con Direct Input) ────────
 snn_mlp:
   model:
     input_dim: 11
-    num_classes: 1          # num_classes = 1 attiva la modalità regressione (MSELoss su mem_out)
+    num_classes: 7
     hidden_dims: [32, 16]
     beta: 0.90              # Decadimento membrana (tau = 10.0)
     num_steps: 10           # Timestep temporali
@@ -102,7 +103,8 @@ snn_mlp:
     lr: 0.005
     batch_size: 64
     weight_decay: 0.0001
-    spike_weight: 0.0       # Opzionale penalità energetica su firing rate
+    mem_weight: 1.0
+    spike_weight: 1.0
   eval:
     batch_size: 64
 
@@ -111,7 +113,7 @@ snn_mlp:
 ltc:
   model:
     input_dim: 11
-    num_classes: 1          # num_classes = 1 attiva la modalità regressione (MSELoss)
+    num_classes: 7
     units: 32               # Neuroni nella cella LTC FullyConnected
     num_steps: 10           # Timestep temporali sequenziali
     dropout: 0.1
@@ -124,3 +126,37 @@ ltc:
   eval:
     batch_size: 64
 
+
+# ── FF-MLP (Forward-Forward Algorithm Hinton) ────────────────
+ff_mlp:
+  model:
+    input_dim: 11
+    num_classes: 7
+    hidden_dims: [64, 32]
+    checkpoint_name: ff_mlp_wine_quality.pt
+  train:
+    epochs_per_layer: 30
+    lr: 0.01
+    threshold: 2.0
+    batch_size: 64
+  eval:
+    batch_size: 64
+
+
+# ── CHL (Contrastive Hebbian Learning Ricorrente) ───────────────
+chl:
+  model:
+    input_dim: 11
+    num_classes: 7
+    hidden_dims: [32]
+    gamma: 0.2
+    t_free: 15
+    t_clamped: 15
+    tol: 0.0001
+    checkpoint_name: chl_wine_quality.pt
+  train:
+    epochs: 20
+    lr: 0.05
+    batch_size: 64
+  eval:
+    batch_size: 64
