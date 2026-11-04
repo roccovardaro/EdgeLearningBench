@@ -129,6 +129,11 @@ class SNNProfiler:
             self._epoch_spikes += spk_out.detach().sum().item()
             self._epoch_elements += spk_out.numel()
 
+    @property
+    def current_firing_rate(self) -> float:
+        """Restituisce il firing rate globale medio accumulato fino all'istante corrente."""
+        return (self._epoch_spikes / self._epoch_elements) if self._epoch_elements > 0 else 0.0
+
     def reset(self):
         """Azzera gli accumulatori di spike."""
         self._epoch_spikes = 0

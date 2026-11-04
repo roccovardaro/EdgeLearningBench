@@ -3,7 +3,7 @@ from argument import get_args
 from datasets.dataset import get_dataloaders
 from device import get_device
 from paths import RESULTS_DIR
-from profiler import EdgeProfiler, TrainEvalProfiler
+from profiler import EdgeProfiler, TrainEvalProfiler, BudgetTracker
 from models.forward_forward.ff_mlp import ff_mlp_run
 from models.forward_forward.ff_resnet import ff_resnet_run
 from models.baseline.resnet import resnet_run
@@ -74,11 +74,29 @@ def main(args):
     te_cfg = getattr(args, "train_eval_profiler", None)
     train_prof = TrainEvalProfiler(tag=tag, output_dir=RESULTS_DIR) if getattr(te_cfg, "enabled", False) else None
 
+    # Setup Budget Tracker (controllo budget computazionale fisso)
+    b_cfg = getattr(args, "budget", None)
+    budget_tracker = BudgetTracker(
+        target_macs=getattr(b_cfg, "max_macs", None),
+        enabled=getattr(b_cfg, "enabled", False),
+        paradigm=paradigm,
+        include_optimizer=getattr(b_cfg, "include_optimizer", True),
+        tag=tag,
+        output_dir=RESULTS_DIR,
+    ) if b_cfg else None
+
+    if budget_tracker:
+        paradigm_args.budget_tracker = budget_tracker
+        if train_prof is None and budget_tracker.enabled:
+            train_prof = TrainEvalProfiler(tag=tag, output_dir=RESULTS_DIR)
+        if train_prof:
+            train_prof.budget_tracker = budget_tracker
+
     if edge_prof:
         edge_prof.start()
 
     try:
-        #ESEGUE IL PARADIGMA SELEZIONATO (TRAIN + EVAL)
+        # ESEGUE IL PARADIGMA SELEZIONATO (TRAIN + EVAL)
         run_fn(paradigm_args, train_loader, test_loader, profiler=train_prof, device=device)
     finally:
         if edge_prof:
@@ -91,6 +109,11 @@ def main(args):
 
         if train_prof and getattr(te_cfg, "export_csv", True):
             train_prof.export_csv()
+
+        if budget_tracker and (budget_tracker.enabled or budget_tracker.cum_macs > 0):
+            budget_tracker.print_summary()
+            if getattr(b_cfg, "export_csv", True):
+                budget_tracker.export_csv()
 
 
 if __name__ == "__main__":

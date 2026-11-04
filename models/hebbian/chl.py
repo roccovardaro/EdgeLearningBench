@@ -260,6 +260,9 @@ def chl_run(args, train_loader, test_loader, profiler=None, device=None) -> CHLN
     print(f"ADDESTRAMENTO CONTRASTIVE HEBBIAN LEARNING {epochs} epoche")
     print("=" * 65)
 
+    budget_tracker = getattr(args, "budget_tracker", getattr(profiler, "budget_tracker", None))
+    budget_stop = False
+
     for epoch in range(epochs):
         t0 = time.time()
         running_loss, correct, total = 0.0, 0, 0
@@ -271,6 +274,9 @@ def chl_run(args, train_loader, test_loader, profiler=None, device=None) -> CHLN
             if x0.ndim > 2:
                 x0 = x0.flatten(1)
             y = F.one_hot(labels.to(device), num_classes=num_classes).float()
+
+            if budget_tracker and budget_tracker.static_fwd_macs == 0:
+                budget_tracker.attach_model(model, sample_input=x0[:1], device=device)
 
             # 1. Fase Libera (Negative Phase / Predizione)
             x_free = model.free_phase(x0)
@@ -292,6 +298,14 @@ def chl_run(args, train_loader, test_loader, profiler=None, device=None) -> CHLN
             total_dw += dw
             steps += 1
 
+            if budget_tracker and budget_tracker.step(
+                batch_size=labels.size(0),
+                chl_steps=model.t_free + model.t_clamped,
+                epoch=epoch + 1,
+            ):
+                budget_stop = True
+                break
+
         elapsed = time.time() - t0
         epoch_loss = running_loss / max(1, total)
         train_acc = correct / max(1, total)
@@ -307,6 +321,9 @@ def chl_run(args, train_loader, test_loader, profiler=None, device=None) -> CHLN
 
         if profiler:
             profiler.log_epoch(epoch + 1, loss=epoch_loss, acc=train_acc, time_sec=elapsed)
+
+        if budget_stop:
+            break
 
     # ── Valutazione Finale ───────────────────────────────────────────────
     print("\n" + "=" * 65)

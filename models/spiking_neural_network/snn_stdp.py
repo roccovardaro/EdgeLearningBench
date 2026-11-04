@@ -428,10 +428,12 @@ def snn_stdp_run(args, train_loader, test_loader, profiler=None, device=None) ->
     learner.reset()
 
     snn_prof = SNNProfiler(model=model, tag="snn_stdp", output_dir=RESULTS_DIR)
+    budget_tracker = getattr(args, "budget_tracker", getattr(profiler, "budget_tracker", None))
     learner.reset()
     initial_weight = model.synapse.weight.clone()
 
     # ── Training (STDP non supervisionato) ───────────────────────
+    budget_stop = False
     try:
         for epoch in range(epochs):
             model.train()
@@ -440,10 +442,24 @@ def snn_stdp_run(args, train_loader, test_loader, profiler=None, device=None) ->
 
             for images, _ in train_loader:
                 images = images.to(device)
+
+                if budget_tracker and budget_tracker.static_fwd_macs == 0:
+                    budget_tracker.attach_model(model, sample_input=images[:1], device=device)
+
                 spk_out, _ = model.forward_and_update(images, learner=learner)
 
                 total_processed += len(images)
                 snn_prof.update(spk_out)
+
+                batch_fr = spk_out.sum().item() / spk_out.numel() if spk_out.numel() > 0 else 0.0
+                if budget_tracker and budget_tracker.step(
+                    batch_size=len(images),
+                    firing_rate=batch_fr,
+                    num_steps_snn=num_steps,
+                    epoch=epoch + 1,
+                ):
+                    budget_stop = True
+                    break
 
                 if train_samples and total_processed >= train_samples:
                     break
@@ -465,6 +481,9 @@ def snn_stdp_run(args, train_loader, test_loader, profiler=None, device=None) ->
             if profiler:
                 profiler.log_epoch(epoch + 1, 0.0, train_acc)
             snn_prof.log_epoch(epoch + 1)
+
+            if budget_stop:
+                break
 
         # ── Valutazione ─────────────────────────────────────────────
         snn_prof.reset()

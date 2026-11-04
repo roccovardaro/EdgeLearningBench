@@ -141,13 +141,19 @@ def cnn_kan_run(args, train_loader, test_loader, profiler=None, device=None):
         model, args, model_type="cnn_kan"
     )
 
+    budget_tracker = getattr(args, "budget_tracker", getattr(profiler, "budget_tracker", None))
+
     # ── Training ────────────────────────────────────────────────
+    budget_stop = False
     for epoch in range(epochs):
         model.train()
         running_loss, correct, total = 0.0, 0, 0
 
         for images, labels in train_loader:
             images, labels = images.to(device), labels.to(device)
+
+            if budget_tracker and budget_tracker.static_fwd_macs == 0:
+                budget_tracker.attach_model(model, sample_input=images[:1], device=device)
 
             optimizer.zero_grad()
             outputs = model(images)
@@ -164,14 +170,23 @@ def cnn_kan_run(args, train_loader, test_loader, profiler=None, device=None):
             correct += (outputs.argmax(1) == labels).sum().item()
             total += labels.size(0)
 
+            if budget_tracker and budget_tracker.step(batch_size=labels.size(0), epoch=epoch + 1):
+                budget_stop = True
+                break
+
+        epoch_loss = running_loss / max(1, total)
+        train_acc = correct / max(1, total)
         print(
             f"Epoch {epoch + 1:3d}/{epochs} | "
-            f"loss={running_loss / total:.4f} | "
-            f"train_acc={correct / total:.4f}"
+            f"loss={epoch_loss:.4f} | "
+            f"train_acc={train_acc:.4f}"
         )
 
         if profiler:
-            profiler.log_epoch(epoch + 1, running_loss / total, correct / total)
+            profiler.log_epoch(epoch + 1, epoch_loss, train_acc)
+
+        if budget_stop:
+            break
 
     # ── Valutazione ─────────────────────────────────────────────
     train_acc = accuracy(model, train_loader, device)

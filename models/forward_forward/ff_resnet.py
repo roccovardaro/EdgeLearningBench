@@ -195,7 +195,7 @@ class FFResNet(nn.Module):
 
 
 
-    def fit(self, train_loader, epochs_per_layer=100, lr=0.001, device=None):
+    def fit(self, train_loader, epochs_per_layer=100, lr=0.001, device=None, profiler=None, budget_tracker=None):
         """Addestramento"""
         device = get_device(device)
         self.to(device)
@@ -203,6 +203,13 @@ class FFResNet(nn.Module):
         self.requires_grad_(False)
         self.history = []
 
+        if budget_tracker is None and profiler is not None:
+            budget_tracker = getattr(profiler, "budget_tracker", None)
+
+        if budget_tracker and budget_tracker.static_fwd_macs == 0:
+            budget_tracker.attach_model(self, device=device)
+
+        budget_stop = False
         for block_idx, block in enumerate(self.blocks):
             print(f"\nTraining block {block_idx + 1}/{len(self.blocks)}")
             block.requires_grad_(True)
@@ -245,6 +252,10 @@ class FFResNet(nn.Module):
                     total_pairs += (g_pos.detach() > g_neg.detach()).sum().item()
                     total_samples += bs
 
+                    if budget_tracker and budget_tracker.step(batch_size=bs, is_ff_step=True, epoch=epoch + 1):
+                        budget_stop = True
+                        break
+
                 if total_samples == 0:
                     raise ValueError("train_loader e' vuoto")
 
@@ -263,9 +274,14 @@ class FFResNet(nn.Module):
                     f"train_acc={total_pairs / total_samples:.4f}"
                 )
 
+                if budget_stop:
+                    break
+
             block.eval()
             block.requires_grad_(False)
             block.zero_grad(set_to_none=True)
+            if budget_stop:
+                break
 
         self.eval()
         return self
@@ -289,7 +305,8 @@ def ff_resnet_run(args, train_loader, test_loader, profiler=None, device=None):
     print(f"Threshold: {model_config['threshold']}")
     print(f"Parametri totali: {total_params:,}")
 
-    model.fit(train_loader, args.train.epochs_per_layer, args.train.lr, device)
+    budget_tracker = getattr(args, "budget_tracker", getattr(profiler, "budget_tracker", None))
+    model.fit(train_loader, args.train.epochs_per_layer, args.train.lr, device, profiler=profiler, budget_tracker=budget_tracker)
     
     train_acc = accuracy(model, train_loader, device)
     test_acc = accuracy(model, test_loader, device)

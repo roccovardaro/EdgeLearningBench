@@ -95,10 +95,17 @@ class FFNet(nn.Module):
 
     # ── Training ─────────────────────────────────────────────────────────
 
-    def fit(self, train_loader, epochs_per_layer=100, lr=0.03, device=None, profiler=None):
+    def fit(self, train_loader, epochs_per_layer=100, lr=0.03, device=None, profiler=None, budget_tracker=None):
         device = get_device(device)
         self.to(device)
 
+        if budget_tracker is None and profiler is not None:
+            budget_tracker = getattr(profiler, "budget_tracker", None)
+
+        if budget_tracker and budget_tracker.static_fwd_macs == 0:
+            budget_tracker.attach_model(self, device=device)
+
+        budget_stop = False
         for layer_idx, layer in enumerate(self.layers):
             print(f"\nTraining layer {layer_idx + 1}/{len(self.layers)}")
             optimizer = Adam(layer.parameters(), lr=lr)
@@ -142,22 +149,31 @@ class FFNet(nn.Module):
                     correct += (g_pos > g_neg).sum().item()
                     total += bs
 
+                    if budget_tracker and budget_tracker.step(batch_size=bs, is_ff_step=True, epoch=epoch + 1):
+                        budget_stop = True
+                        break
+
                 print(
                     f"Epoch {epoch + 1:3d}/{epochs_per_layer} | "
-                    f"loss={total_loss / total:.4f} | "
-                    f"train_acc={correct / total:.4f}"
+                    f"loss={total_loss / max(1, total):.4f} | "
+                    f"train_acc={correct / max(1, total):.4f}"
                 )
 
                 if profiler:
                     profiler.log_epoch(
                         epoch=layer_idx * epochs_per_layer + epoch + 1,
-                        loss=total_loss / total,
-                        acc=correct / total,
+                        loss=total_loss / max(1, total),
+                        acc=correct / max(1, total),
                         layer=layer_idx + 1,
                     )
 
+                if budget_stop:
+                    break
+
             # Layer completato: congela
             layer.requires_grad_(False)
+            if budget_stop:
+                break
 
         self.eval()
 

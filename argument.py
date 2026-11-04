@@ -33,6 +33,18 @@ def get_args():
     parser.add_argument("--profiler_config", default="configs/profiler.yaml")
     parser.add_argument("--device", default=None, help="Dispositivo di calcolo (cpu, mps, cuda, auto)")
     parser.add_argument("--paradigm", default=None, help="Paradigma di calcolo/modello")
+    parser.add_argument(
+        "--max_macs",
+        type=float,
+        default=None,
+        help="Budget massimo di MAC equivalenti (es. 1e14 o 5e12). Se specificato, attiva automaticamente il budget.",
+    )
+    parser.add_argument(
+        "--budget_enabled",
+        type=lambda x: (str(x).lower() in ["true", "1", "yes"]),
+        default=None,
+        help="Attiva o disattiva il controllo del budget computazionale fisso (true/false).",
+    )
     cli_args = parser.parse_args()
 
     config_path = DATASET_MAP.get(cli_args.dataset, cli_args.dataset)
@@ -63,6 +75,29 @@ def get_args():
         config["device"] = cli_args.device
     if cli_args.paradigm:
         config["paradigm"] = cli_args.paradigm
+
+    # Gestione e override del Budget computazionale
+    if "budget" not in config or not isinstance(config["budget"], dict):
+        config["budget"] = {
+            "enabled": False,
+            "max_macs": None,
+            "include_optimizer": True,
+            "export_csv": True,
+        }
+
+    # Assicura che max_macs sia float se specificato in YAML
+    if config["budget"].get("max_macs") is not None:
+        try:
+            config["budget"]["max_macs"] = float(config["budget"]["max_macs"])
+        except (ValueError, TypeError):
+            pass
+
+    # Override da CLI
+    if cli_args.max_macs is not None:
+        config["budget"]["max_macs"] = float(cli_args.max_macs)
+        config["budget"]["enabled"] = True
+    if cli_args.budget_enabled is not None:
+        config["budget"]["enabled"] = cli_args.budget_enabled
 
     args = to_namespace(config)
     return args
