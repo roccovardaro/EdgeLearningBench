@@ -3,27 +3,7 @@ import subprocess
 import sys
 import time
 from device import get_device
-
-PARADIGMS = [
-    "mlp",
-    "mlp_snn",
-    "cnn",
-    "cnn_snn",
-    "resnet",
-    "ff_mlp",
-    "ff_resnet",
-    "kan",
-    "direct_kan",
-    "cnn_kan",
-    "snn_mlp",
-    "snn_cnn",
-    "snn_resnet",
-    "snn_stdp",
-    "ltc",
-    "cnn_ltc",
-    "chl",
-]
-
+from paradigm import get_paradigm_list
 
 def main():
     parser = argparse.ArgumentParser(description="Esegue tutti i paradigmi in sequenza su un dataset.")
@@ -44,7 +24,7 @@ def main():
     print(f"Dataset: {args.dataset} | Dispositivo: {device}")
     results = {}
 
-    for paradigm in PARADIGMS:
+    for paradigm in get_paradigm_list():
         print(f"\n>>> Esecuzione: {paradigm}")
         cmd = [
             sys.executable,

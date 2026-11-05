@@ -187,9 +187,7 @@ class BudgetTracker:
         self.cum_fwd_macs: float = 0.0
         self.cum_bwd_macs: float = 0.0
         self.samples_seen: int = 0
-        self.steps: int = 0
         self.exhausted: bool = False
-        self.stop_step: Optional[int] = None
         self.stop_epoch: Optional[int] = None
 
     def attach_model(
@@ -299,18 +297,16 @@ class BudgetTracker:
         self.cum_bwd_macs += costs["bwd"]
         self.cum_macs += costs["total"]
         self.samples_seen += batch_size
-        self.steps += 1
 
         if self.enabled and self.target_macs and self.cum_macs >= self.target_macs:
             if not self.exhausted:
                 self.exhausted = True
-                self.stop_step = self.steps
                 self.stop_epoch = epoch
                 pct = (self.cum_macs / self.target_macs) * 100.0
                 print(f"\n{'!' * 70}")
                 print(f"[BudgetTracker] 🛑 BUDGET COMPUTAZIONALE RAGGIUNTO!")
                 print(f"[BudgetTracker] MAC teorici stimati: {self.cum_macs:.3e} / {self.target_macs:.3e} ({pct:.1f}%)")
-                print(f"[BudgetTracker] Campioni processati: {self.samples_seen:,} | Step: {self.steps} (Epoca: {epoch})")
+                print(f"[BudgetTracker] Campioni processati: {self.samples_seen:,} (Epoca: {epoch})")
                 print(f"{'!' * 70}\n")
             return True
 
@@ -336,14 +332,10 @@ class BudgetTracker:
             print(f"  Budget prefissato:          {self.target_macs:.3e} MAC_eq")
         print(f"  MAC_eq totali stimati:      {self.cum_macs:.3e} MAC_eq")
         print(f"  Campioni di training visti: {self.samples_seen:,}")
-        print(f"  Step di ottimizzazione:     {self.steps:,}")
         print("-" * 65)
         print("  Ripartizione del Costo di Addestramento:")
         print(f"    - Forward pass (C_fwd):   {self.cum_fwd_macs:.3e} MAC_eq  ({pct_fwd:5.1f}%)")
         print(f"    - Backward/Update (C_bwd):{self.cum_bwd_macs:.3e} MAC_eq  ({pct_bwd:5.1f}%)")
-        print("-" * 65)
-        print("  * Nota: il conteggio sparso SNN presuppone di saltare le operazioni")
-        print("    associate agli spike assenti (zeri).")
         print("=" * 65 + "\n")
 
     def export_csv(self, filepath: Optional[Union[str, Path]] = None) -> Path:
@@ -353,7 +345,7 @@ class BudgetTracker:
 
         fieldnames = [
             "tag", "paradigm", "target_macs", "cum_macs", "cum_fwd_macs",
-            "cum_bwd_macs", "samples_seen", "steps", "budget_exhausted"
+            "cum_bwd_macs", "samples_seen", "budget_exhausted"
         ]
         row = {
             "tag": self.tag,
@@ -363,7 +355,6 @@ class BudgetTracker:
             "cum_fwd_macs": round(self.cum_fwd_macs, 2),
             "cum_bwd_macs": round(self.cum_bwd_macs, 2),
             "samples_seen": self.samples_seen,
-            "steps": self.steps,
             "budget_exhausted": self.exhausted,
         }
 

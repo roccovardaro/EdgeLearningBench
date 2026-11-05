@@ -16,7 +16,7 @@ dataset:
 # ff_mlp | ff_resnet | resnet | cnn | kan | direct_kan | mlp | cnn_kan |
 # snn_mlp | snn_cnn | snn_resnet | snn_stdp | mlp_snn | cnn_snn | ltc | cnn_ltc |
 # chl
-paradigm: cnn
+paradigm: mlp
 
 # Dispositivo di calcolo: auto | cpu | mps | cuda | cuda:0
 device: auto
@@ -55,9 +55,9 @@ ff_mlp:
     epochs_per_layer: 20
     lr: 0.03
     threshold: 2.0
-    batch_size: 256
+    batch_size: 128
   eval:
-    batch_size: 256
+    batch_size: 128
 
 
 # ── KAN (Kolmogorov-Arnold Network con Bottleneck) ───────────
