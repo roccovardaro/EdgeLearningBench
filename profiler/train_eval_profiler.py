@@ -6,13 +6,13 @@ import csv
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 
 class TrainEvalProfiler:
     """Registra metriche di training e valutazione ed esporta in CSV (epoch, loss, accuracy, time)."""
 
-    def __init__(self, tag: str = "benchmark", output_dir: Optional[Path] = None):
+    def __init__(self, tag: str = "benchmark", output_dir: Optional[Union[str, Path]] = None):
         self.tag = tag
         self.output_dir = Path(output_dir) if output_dir else Path.cwd() / "results"
         self.train_records: List[Dict[str, Any]] = []

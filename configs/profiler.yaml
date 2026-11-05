@@ -11,9 +11,8 @@ train_eval_profiler:
   enabled: true
   export_csv: true       # Esporta i dati di train ed eval in results/
 
-# ── Configurazione Budget Computazionale Fisso (MAC Equivalenti) ──────
+# ── Configurazione Budget Computazionale Fisso (MAC Teorici) ──────────
 budget:
   enabled: true          # true: interrompe l'addestramento al raggiungimento del budget; false: addestramento canonico
-  max_macs: 1.0e11       # Numero totale di MAC equivalenti consentiti (es. 1.0e14, 5.0e12, 1e11)
-  include_optimizer: false # Se conteggiare anche il costo dell'ottimizzatore (C_opt)
+  max_macs: 1.0e12       # Numero totale di MAC aritmetici teorici consentiti (es. 1.0e11, 5.0e12)
   export_csv: true       # Salva il report riassuntivo del budget in results/

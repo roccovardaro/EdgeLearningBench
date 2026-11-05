@@ -21,6 +21,8 @@ from models.spiking_neural_network.ann_snn_conversion.cnn_snn import cnn_snn_run
 from models.ltc.ltc import ltc_run
 from models.ltc.cnn_ltc import cnn_ltc_run
 from models.hebbian.chl import chl_run
+import logging
+logging.getLogger("torch._library.triton").setLevel(logging.ERROR)
 
 _PARADIGMS = {
     "ff_mlp": ff_mlp_run,
@@ -80,7 +82,6 @@ def main(args):
         target_macs=getattr(b_cfg, "max_macs", None),
         enabled=getattr(b_cfg, "enabled", False),
         paradigm=paradigm,
-        include_optimizer=getattr(b_cfg, "include_optimizer", True),
         tag=tag,
         output_dir=RESULTS_DIR,
     ) if b_cfg else None

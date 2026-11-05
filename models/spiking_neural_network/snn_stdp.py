@@ -260,10 +260,12 @@ class SpikingSTDP(nn.Module):
     def _predict_counts(self, counts: torch.Tensor) -> torch.Tensor:
         """Predice la classe ponderando i voti in base alla specificità di ciascun neurone (Diehl & Cook 2015)."""
         scores = counts.new_zeros((counts.shape[0], self.num_classes))
+        assigned_labels = self.assigned_labels.to(counts.device)
+        assigned_weights = self.assigned_weights.to(counts.device)
         for label in range(self.num_classes):
-            selected = self.assigned_labels == label
+            selected = assigned_labels == label
             if selected.any():
-                weights = self.assigned_weights[selected]
+                weights = assigned_weights[selected]
                 scores[:, label] = (counts[:, selected] * weights).sum(dim=1) / weights.sum().clamp_min(1e-6)
         preds = scores.argmax(dim=1)
         silent = scores.max(dim=1).values == 0

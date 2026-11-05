@@ -11,69 +11,11 @@ Monitora:
 import csv
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 import torch
 import torch.nn as nn
-from spikingjelly.activation_based import functional as sj_functional
 
-
-def compute_model_macs(model: nn.Module) -> int:
-    """Calcola i MAC teorici equivalenti dell'ANN per singola inferenza."""
-    macs_dict = {}
-    hooks = []
-
-    def make_hook(name):
-        def hook(mod, inp, out):
-            if isinstance(mod, nn.Linear):
-                macs_dict[name] = mod.in_features * mod.out_features
-            elif isinstance(mod, nn.Conv2d):
-                out_tensor = out[0] if isinstance(out, tuple) else out
-                kh, kw = mod.kernel_size if isinstance(mod.kernel_size, tuple) else (mod.kernel_size, mod.kernel_size)
-                cin = mod.in_channels // mod.groups
-                h_out, w_out = out_tensor.shape[2], out_tensor.shape[3]
-                cout = mod.out_channels
-                macs_dict[name] = cin * kh * kw * cout * h_out * w_out
-        return hook
-
-    for name, m in model.named_modules():
-        if isinstance(m, (nn.Linear, nn.Conv2d)):
-            hooks.append(m.register_forward_hook(make_hook(name)))
-
-    device = next(model.parameters()).device
-    was_training = model.training
-    model.eval()
-
-    dummy = None
-    if getattr(model, "input_dim", None) is not None:
-        dummy = torch.zeros(2, model.input_dim, device=device)
-
-    else:
-        for m in model.modules():
-            if isinstance(m, nn.Conv2d):
-                dummy = torch.zeros(2, m.in_channels, 32, 32, device=device)
-                break
-        if dummy is None:
-            dummy = torch.zeros(2, 3, 32, 32, device=device)
-
-    old_steps = getattr(model, "num_steps", None)
-    if old_steps is not None:
-        model.num_steps = 1
-
-    try:
-        with torch.no_grad():
-            model(dummy)
-    except Exception:
-        pass
-    finally:
-        if old_steps is not None:
-            model.num_steps = old_steps
-        if was_training:
-            model.train()
-        for h in hooks:
-            h.remove()
-        sj_functional.reset_net(model)
-
-    return sum(macs_dict.values())
+from profiler.budget_tracker import compute_model_static_macs as compute_model_macs
 
 
 class SNNProfiler:
@@ -86,7 +28,7 @@ class SNNProfiler:
     def __init__(
         self,
         tag: str = "snn",
-        output_dir: Optional[Path] = None,
+        output_dir: Optional[Union[str, Path]] = None,
         model: Optional[nn.Module] = None,
         num_steps: Optional[int] = None,
     ):
@@ -142,7 +84,7 @@ class SNNProfiler:
     def log_epoch(self, epoch: Any = 1, tag: str = "train", verbose: bool = False) -> Dict[str, Any]:
         """Chiude l'epoca o fase (train/test), registra e resetta gli accumulatori.
            Vengono calcolate le metriche chiave prima di azzerare i contatori per la fase successiva."""
-        firing_rate = self._epoch_spikes / self._epoch_elements if self._epoch_elements > 0 else 0.0
+        firing_rate = self.current_firing_rate
         sparsity = 1.0 - firing_rate
 
         # Stima neuromorfica per singolo campione

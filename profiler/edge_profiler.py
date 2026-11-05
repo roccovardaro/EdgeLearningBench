@@ -11,6 +11,7 @@ Monitora in tempo reale (in background):
 import csv
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -18,9 +19,12 @@ import time
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import psutil
+
+# Rilevamento presenza vcgencmd (Raspberry Pi OS) per evitare chiamate subprocess a vuoto
+_HAS_VCGENCMD = shutil.which("vcgencmd") is not None
 
 # Rilevamento PyTorch (opzionale per GPU tracking)
 try:
@@ -74,23 +78,26 @@ def _get_rpi_temperature() -> Optional[float]:
         pass
 
     # 3. vcgencmd (utility ufficiale Raspberry Pi OS)
-    try:
-        out = subprocess.check_output(
-            ["vcgencmd", "measure_temp"],
-            stderr=subprocess.DEVNULL,
-            timeout=0.5
-        ).decode().strip()
-        # Output tipico: temp=48.2'C
-        val = out.replace("temp=", "").replace("'C", "")
-        return float(val)
-    except Exception:
-        pass
+    if _HAS_VCGENCMD:
+        try:
+            out = subprocess.check_output(
+                ["vcgencmd", "measure_temp"],
+                stderr=subprocess.DEVNULL,
+                timeout=0.5
+            ).decode().strip()
+            # Output tipico: temp=48.2'C
+            val = out.replace("temp=", "").replace("'C", "")
+            return float(val)
+        except Exception:
+            pass
 
     return None
 
 
 def _check_rpi_throttling() -> Optional[Dict[str, Any]]:
     """Controlla lo stato di thermal/voltage throttling su Raspberry Pi."""
+    if not _HAS_VCGENCMD:
+        return None
     try:
         out = subprocess.check_output(
             ["vcgencmd", "get_throttled"],
@@ -145,7 +152,7 @@ class EdgeProfiler:
         interval_sec: float = 1.0,
         track_energy: bool = True,
         tag: Optional[str] = None,
-        output_dir: Optional[Path] = None,
+        output_dir: Optional[Union[str, Path]] = None,
     ):
         """
         Args:
@@ -157,7 +164,7 @@ class EdgeProfiler:
         self.interval_sec = max(0.1, interval_sec)
         self.track_energy = track_energy
         self.tag = tag or "benchmark"
-        self.output_dir = Path(output_dir) if output_dir else None
+        self.output_dir = Path(output_dir) if output_dir else Path.cwd() / "results"
 
         self._process = psutil.Process(os.getpid())
         self._running = False
@@ -461,43 +468,40 @@ class EdgeProfiler:
 
         print("=" * 62 + "\n")
 
-    def export_csv(self, filepath: Optional[Path] = None) -> Path:
-        """Esporta la serie temporale dei campioni in formato CSV."""
-        if filepath is None:
-            now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-            target_dir = self.output_dir or Path.cwd()
-            target_dir.mkdir(parents=True, exist_ok=True)
-            filepath = target_dir / f"{self.tag}_samples_{now_str}.csv"
+    def _resolve_export_path(self, filepath: Optional[Union[str, Path]], suffix: str, ext: str) -> Path:
+        """Risolve e crea la cartella di destinazione per il file di export (CSV o JSON)."""
+        if filepath is not None:
+            path = Path(filepath)
         else:
-            filepath = Path(filepath)
-            filepath.parent.mkdir(parents=True, exist_ok=True)
+            now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+            target_dir = self.output_dir or (Path.cwd() / "results")
+            path = target_dir / f"{self.tag}_{suffix}_{now_str}.{ext}"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def export_csv(self, filepath: Optional[Union[str, Path]] = None) -> Path:
+        """Esporta la serie temporale dei campioni in formato CSV."""
+        target_path = self._resolve_export_path(filepath, "samples", "csv")
 
         with self._lock:
             samples = list(self.samples)
 
         if not samples:
             print("[EdgeProfiler] Nessun campione da esportare.")
-            return filepath
+            return target_path
 
         fieldnames = list(samples[0].keys())
-        with open(filepath, "w", newline="", encoding="utf-8") as f:
+        with open(target_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(samples)
 
-        print(f"[EdgeProfiler] Campioni CSV esportati in: {filepath}")
-        return filepath
+        print(f"[EdgeProfiler] Campioni CSV esportati in: {target_path}")
+        return target_path
 
-    def export_json(self, filepath: Optional[Path] = None) -> Path:
+    def export_json(self, filepath: Optional[Union[str, Path]] = None) -> Path:
         """Esporta energia e consumi (e riepilogo hardware) in formato JSON."""
-        if filepath is None:
-            now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-            target_dir = self.output_dir or Path.cwd()
-            target_dir.mkdir(parents=True, exist_ok=True)
-            filepath = target_dir / f"{self.tag}_energy_{now_str}.json"
-        else:
-            filepath = Path(filepath)
-            filepath.parent.mkdir(parents=True, exist_ok=True)
+        target_path = self._resolve_export_path(filepath, "energy", "json")
 
         summary = self.summary()
         energy = summary["energy"]
@@ -520,8 +524,8 @@ class EdgeProfiler:
             },
         }
 
-        with open(filepath, "w", encoding="utf-8") as f:
+        with open(target_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4)
 
-        print(f"[EdgeProfiler] Dati energetici JSON esportati in: {filepath}")
-        return filepath
+        print(f"[EdgeProfiler] Dati energetici JSON esportati in: {target_path}")
+        return target_path

@@ -1,44 +1,27 @@
 """
-BudgetTracker: Modulo per il tracciamento e controllo del budget computazionale fisso
-in termini di MAC equivalenti (MAC_eq).
+BudgetTracker: Modulo per il tracciamento e controllo del budget computazionale fisso.
+Definito come "Budget Sinaptico Teorico Stimato in MAC Equivalenti (MAC_eq)"
+ad ambito parziale: consideriamo le operazioni sinaptiche e di correlazione,
+escludendo le operazioni accessorie e l'aggiornamento pesi dell'ottimizzatore.
 
-Consente un confronto fair, riproducibile ed energeticamente consistente tra paradigmi
-eterogenei (ANN standard con backprop, SNN, Forward-Forward, Hebbiano/CHL, KAN, LTC).
-
-Modello di Costo Computazionale:
-  1. Forward pass (C_fwd):
-     - ANN / Dense / Conv: calcolo statico del numero di moltiplicazioni e accumuli per campione * batch_size.
-     - SNN: Synaptic Operations (SOP) sparse moltiplicate per il fattore di conversione energetico
-            o operazionale: SOP * alpha_sop * batch_size + dinamica di membrana neuronale.
-     - KAN: valutazione di B-splines per connessione (griglia G + ordine k + 1) * Linear MACs.
-     - CHL: (T_free + T_clamped) passi di rilassamento ricorrente * forward pass.
-     - Forward-Forward: 2 forward pass (dati positivi e negativi) * batch_size.
-     - LTC / ODE: forward pass proiettato su sequenze temporali con integrazione dinamica.
-
-  2. Backward pass (C_bwd):
-     - ANN standard (Backprop): C_bwd ≈ 2 * C_fwd (gradiente attivazioni + gradiente pesi).
-     - SNN (BPTT con Surrogate Gradient): gradienti continui densi attraverso T intervalli temporali:
-       C_bwd ≈ 2 * T * C_fwd_dense.
-     - Forward-Forward: gradienti locali dei singoli layer rispetto alla bontà: C_bwd ≈ 2 * C_fwd_layer.
-     - CHL: nessun backward con gradiente; aggiornamento contrastivo locale delle co-attivazioni: C_bwd ≈ 1 * C_fwd.
-     - KAN: autograd continuo sulle B-spline: C_bwd ≈ 2 * C_fwd_kan.
-
-  3. Aggiornamento pesi dell'ottimizzatore (C_opt):
-     - SGD: 1 moltiplicazione scalare + 1 somma per parametro => 0.5 MAC / parametro.
-     - Adam / AdamW: calcolo del primo e secondo momento, bias correction, radice e divisione:
-       ~10 FLOP / parametro => ~2.5 MAC_eq / parametro per batch.
-
-Metrica di conversione:
-  - Energy Mode (Horowitz 2014, CMOS 45nm @ FP32/16):
-      E_MAC = 4.6 pJ, E_AC = 0.9 pJ => 1 SOP (AC) = 0.1956 MAC_eq (circa 0.20 MAC).
-  - Operational Mode (FLOP count puro):
-      1 MAC = 2 FLOPs, 1 AC = 1 FLOP => 1 SOP (AC) = 0.50 MAC_eq.
+Convenzione e presupposti dichiarati (agnostici dall'hardware):
+  - 1 MAC = 1 MUL + 1 ADD = 2 FLOPs
+  - 1 AC (Accumulo sinaptico puro / Addizione) = 0.50 MAC (1 FLOP)
+  - Il conteggio sparso delle SNN presuppone hardware neuromorfico o algoritmi event-driven
+    capaci di saltare le operazioni associate agli spike assenti (zeri).
+  - ANN standard (Backprop): C_fwd = 1.0 * base, C_bwd = 2.0 * base
+  - KAN: static_macs include le basi B-spline ricorsive (Cox-de Boor cubico ~31.5 MAC/feature)
+  - LTC: static_macs include la cella ncps con S = ode_unfolds = 6 sottopassi ODE
+  - SNN (BPTT): C_fwd = T * F_analogico + 0.5 * r * T * F_spiking (primo layer a costo pieno); C_bwd = 2.0 * T * base
+  - SNN (STDP): Forward sparsi guidati da r_pre; C_bwd = 0.5 * (r_pre + r_post) * T * base (LTP e LTD associativi, NO BPTT)
+  - Forward-Forward MLP: C_fwd = 2.0 * base, C_bwd = 2.0 * base (strati lineari isolati)
+  - Forward-Forward ResNet: C_fwd = 2.0 * base, C_bwd = 4.0 * base (con backward intra-blocco)
+  - CHL: C_fwd = 2.0 * T_steps * base (rilassamento bidirezionale), C_bwd = 2.0 * base (2 correlazioni)
 """
 
 import csv
-import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Union
 import torch
 import torch.nn as nn
 
@@ -56,68 +39,74 @@ def compute_model_static_macs(
 ) -> int:
     """
     Calcola staticamente il numero teorico di MAC per un singolo campione nel forward pass.
-    Supporta Linear, Conv2d, BatchNorm, KAN (KANLinear), e layer SpikingJelly.
+    Supporta Conv2d, Linear, KANLinear e celle ricorrenti LTC con solver ODE.
     """
     macs_dict: Dict[str, int] = {}
     hooks = []
 
-    def make_hook(name):
+    def make_hook(name: str):
         def hook(mod, inp, out):
             mod_class = mod.__class__.__name__
-
-            # 1. Layer Convoluzionali
             if isinstance(mod, nn.Conv2d):
                 out_tensor = out[0] if isinstance(out, tuple) else out
                 kh, kw = mod.kernel_size if isinstance(mod.kernel_size, tuple) else (mod.kernel_size, mod.kernel_size)
                 cin = mod.in_channels // mod.groups
-                h_out, w_out = out_tensor.shape[2], out_tensor.shape[3]
-                cout = mod.out_channels
-                macs_dict[name] = int(cin * kh * kw * cout * h_out * w_out)
-
-            # 2. Layer KAN (efficient-kan KANLinear)
+                macs_dict[name] = int(cin * kh * kw * mod.out_channels * out_tensor.shape[2] * out_tensor.shape[3])
             elif "KANLinear" in mod_class:
                 in_f = getattr(mod, "in_features", 0)
                 out_f = getattr(mod, "out_features", 0)
-                grid_s = getattr(mod, "grid_size", 5)
-                spline_o = getattr(mod, "spline_order", 3)
-                num_bases = grid_s + spline_o
-                # Base lineare + combinazione spline pesata
-                macs_dict[name] = int(in_f * out_f * (1 + num_bases))
-
-            # 3. Layer Lineari standard o SpikingJelly layer.Linear
-            elif isinstance(mod, nn.Linear) or hasattr(mod, "in_features") and hasattr(mod, "out_features"):
-                in_f = getattr(mod, "in_features", 0)
-                out_f = getattr(mod, "out_features", 0)
-                macs_dict[name] = int(in_f * out_f)
-
+                grid_size = getattr(mod, "grid_size", 5)
+                spline_order = getattr(mod, "spline_order", 3)
+                num_bases = grid_size + spline_order
+                # Proiezione combinata basi spline + base SiLU: in_f * out_f * (1 + num_bases)
+                proj_macs = in_f * out_f * (1 + num_bases)
+                # Valutazione ricorsiva basi B-spline (algoritmo di Cox-de Boor cubico: ~31.5 MAC per input feature)
+                spline_eval_macs = int(31.5 * in_f)
+                macs_dict[name] = int(proj_macs + spline_eval_macs)
+            elif "LTC" in mod_class or hasattr(mod, "rnn_cell") or hasattr(mod, "wirings"):
+                # Cella LTC di ncps (Liquid Time-Constant) con dinamica continua e solver ODE
+                units = getattr(mod, "units", None)
+                if hasattr(units, "units"):
+                    units = units.units
+                elif not isinstance(units, int):
+                    units = getattr(mod, "state_size", 64)
+                in_features = getattr(mod, "input_size", units)
+                num_steps = getattr(model, "num_steps", 16)
+                # ncps.torch.LTCCell ode_unfolds (valore predefinito in ncps = 6)
+                ode_unfolds = getattr(mod, "ode_unfolds", getattr(getattr(mod, "cell", None), "ode_unfolds", 6))
+                # C_sensoriale = 2.5 * in_features * units (proiezione + gating precalcolati 1 volta/step)
+                c_sens = 2.5 * in_features * units
+                # C_ricorrente = 2.5 * units^2 (connessioni ricorrenti all-to-all + gating)
+                c_rec = 2.5 * (units ** 2)
+                # C_stato = 3.0 * units (integrazione numerica ODE a ogni sottopasso)
+                c_state = 3.0 * units
+                # C_step = C_sensoriale + S * (C_ricorrente + C_stato)
+                step_macs = int(c_sens + ode_unfolds * (c_rec + c_state))
+                macs_dict[name] = int(step_macs * num_steps)
+            elif isinstance(mod, nn.Linear) or (hasattr(mod, "in_features") and hasattr(mod, "out_features")):
+                macs_dict[name] = int(getattr(mod, "in_features", 0) * getattr(mod, "out_features", 0))
         return hook
 
-    # Registra hook sui moduli computazionali (Linear, Conv2d, KANLinear)
     for name, m in model.named_modules():
-        mod_class = m.__class__.__name__
-        if isinstance(m, (nn.Linear, nn.Conv2d)) or "KANLinear" in mod_class:
+        if (
+            isinstance(m, (nn.Linear, nn.Conv2d))
+            or "KANLinear" in m.__class__.__name__
+            or "LTC" in m.__class__.__name__
+        ):
             hooks.append(m.register_forward_hook(make_hook(name)))
 
-    dev = device or next(model.parameters()).device if list(model.parameters()) else torch.device("cpu")
+    dev = device or (next(model.parameters()).device if list(model.parameters()) else torch.device("cpu"))
     was_training = model.training
     model.eval()
 
-    # Prepara un dummy input rappresentativo per triggerare gli hook
+    # Prepara un dummy input rappresentativo [1, ...]
     dummy = sample_input
     if dummy is None:
-        if input_dim is not None:
-            if isinstance(input_dim, (int, float)):
-                dummy = torch.zeros(1, int(input_dim), device=dev)
-            elif isinstance(input_dim, (tuple, list)):
-                dummy = torch.zeros(1, *input_dim, device=dev)
-        elif getattr(model, "input_dim", None) is not None:
-            inp_d = model.input_dim
-            if isinstance(inp_d, (int, float)):
-                dummy = torch.zeros(1, int(inp_d), device=dev)
-            elif isinstance(inp_d, (tuple, list)):
-                dummy = torch.zeros(1, *inp_d, device=dev)
+        inp_d = input_dim if input_dim is not None else getattr(model, "input_dim", None)
+        if inp_d is not None:
+            shape = (1, int(inp_d)) if isinstance(inp_d, (int, float)) else (1, *inp_d)
+            dummy = torch.zeros(*shape, device=dev)
         else:
-            # Ricerca euristica da layer Conv o Linear
             for m in model.modules():
                 if isinstance(m, nn.Conv2d):
                     dummy = torch.zeros(1, m.in_channels, 32, 32, device=dev)
@@ -128,7 +117,6 @@ def compute_model_static_macs(
             if dummy is None:
                 dummy = torch.zeros(1, 784, device=dev)
 
-    # Assicura batch size pari a 1 per il dummy test
     if dummy.shape[0] != 1:
         dummy = dummy[:1]
 
@@ -140,7 +128,6 @@ def compute_model_static_macs(
         with torch.no_grad():
             model(dummy.to(dev))
     except Exception:
-        # Fallback per reti con firme speciali (es. CHL o modelli ricorrenti)
         pass
     finally:
         if old_steps is not None:
@@ -151,14 +138,14 @@ def compute_model_static_macs(
             h.remove()
 
     total_macs = sum(macs_dict.values())
-
-    # Fallback analitico se gli hook non hanno catturato operazioni (es. CHL o tensori custom)
+    first_macs = next(iter(macs_dict.values()), 0) if macs_dict else 0
+    setattr(model, "_first_layer_static_macs", first_macs)
     if total_macs == 0:
-        for p_name, p in model.named_parameters():
-            if p.ndim == 2:  # Matrice pesi [out_features, in_features]
+        for p in model.parameters():
+            if p.ndim == 2:
                 total_macs += p.numel()
-            elif p.ndim == 4:  # Kernel conv [out_c, in_c, kh, kw]
-                total_macs += p.numel() * 28 * 28  # Stima risoluzione media
+            elif p.ndim == 4:
+                total_macs += p.numel() * 28 * 28
 
     return max(1, total_macs)
 
@@ -166,55 +153,44 @@ def compute_model_static_macs(
 class BudgetTracker:
     """
     Traccia ed impone un budget computazionale fisso durante l'addestramento.
-    Supporta tutti i paradigmi di calcolo ed esporta report dettagliati.
-    Adotta la metrica operazionale standard (Op-Count): 1 SOP (AC) = 0.50 MAC_eq.
+    Conteggio puramente aritmetico in MAC teorici (Multiply-Accumulate).
     """
 
-    ALPHA_SOP = 0.50  # 1 AC = 1 FLOP = 0.50 MAC
+    ALPHA_SOP = 0.50
 
     def __init__(
         self,
         target_macs: Optional[Union[float, int, str]] = None,
         enabled: bool = True,
         paradigm: str = "ann",
-        include_optimizer: bool = True,
-        optimizer_type: str = "adamw",
         tag: str = "benchmark",
         output_dir: Optional[Union[str, Path]] = None,
+        **kwargs: Any,
     ):
-        if target_macs is not None:
-            try:
-                self.target_macs = float(target_macs)
-            except (ValueError, TypeError):
-                self.target_macs = None
-        else:
+        try:
+            self.target_macs: Optional[float] = float(target_macs) if target_macs is not None else None
+        except (ValueError, TypeError):
             self.target_macs = None
 
-        self.enabled = bool(enabled and self.target_macs is not None and self.target_macs > 0)
+        self.enabled = bool(enabled and self.target_macs and self.target_macs > 0)
         self.paradigm = (paradigm or "ann").lower()
-        self.include_optimizer = bool(include_optimizer)
-        self.optimizer_type = (optimizer_type or "adamw").lower()
         self.tag = tag
         self.output_dir = Path(output_dir) if output_dir else Path.cwd() / "results"
 
-        # Metriche statiche del modello (inizializzate con attach_model)
+        # Metriche statiche modello (popolate da attach_model)
         self.static_fwd_macs: int = 0
         self.num_params: int = 0
         self.num_neurons: int = 0
 
-        # Accumulatori di progresso computazionale
+        # Accumulatori
         self.cum_macs: float = 0.0
         self.cum_fwd_macs: float = 0.0
         self.cum_bwd_macs: float = 0.0
-        self.cum_opt_macs: float = 0.0
         self.samples_seen: int = 0
         self.steps: int = 0
         self.exhausted: bool = False
         self.stop_step: Optional[int] = None
         self.stop_epoch: Optional[int] = None
-
-        # Storico per step
-        self.step_history: List[Dict[str, Any]] = []
 
     def attach_model(
         self,
@@ -223,27 +199,22 @@ class BudgetTracker:
         input_dim: Optional[Any] = None,
         device: Optional[torch.device] = None,
     ) -> None:
-        """Collega il modello e ne calcola i parametri e i MAC statici per singolo campione."""
-        self.num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        if self.num_params == 0:
-            self.num_params = sum(p.numel() for p in model.parameters())
+        """Collega il modello e calcola parametri e MAC statici per singolo campione."""
+        params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        self.num_params = params or sum(p.numel() for p in model.parameters())
+        self.static_fwd_macs = compute_model_static_macs(model, sample_input, input_dim, device)
+        self.first_layer_static_macs = getattr(model, "_first_layer_static_macs", 0)
+        self.num_neurons = max(1, sum(m.out_features for m in model.modules() if isinstance(m, nn.Linear)))
+        
+        # Rileva features di input (per tracce pre-sinaptiche in STDP)
+        self.input_features = 784
+        if sample_input is not None:
+            self.input_features = sample_input.flatten(1).shape[1] if sample_input.ndim > 1 else sample_input.numel()
+        elif input_dim is not None:
+            self.input_features = int(input_dim) if isinstance(input_dim, (int, float)) else int(torch.prod(torch.tensor(input_dim)))
 
-        self.static_fwd_macs = compute_model_static_macs(
-            model=model,
-            sample_input=sample_input,
-            input_dim=input_dim,
-            device=device,
-        )
-
-        # Stima del numero di neuroni (utile per la dinamica di stato SNN/LTC)
-        neurons = 0
-        for m in model.modules():
-            if isinstance(m, nn.Linear):
-                neurons += m.out_features
-        self.num_neurons = max(1, neurons)
-
-        status_str = f"ATTIVO (Target: {self.target_macs:.2e} MAC_eq)" if self.enabled else "PASSIVO (Solo monitoraggio)"
-        print(f"[BudgetTracker] Inizializzato per paradigma '{self.paradigm}' [{status_str}]")
+        status = f"ATTIVO (Target: {self.target_macs:.2e} MAC)" if self.enabled else "PASSIVO (Solo monitoraggio)"
+        print(f"[BudgetTracker] Inizializzato per paradigma '{self.paradigm}' [{status}]")
         print(f"[BudgetTracker] Parametri: {self.num_params:,} | MAC statici/campione forward: {self.static_fwd_macs:,}")
 
     def compute_step_macs(
@@ -253,67 +224,57 @@ class BudgetTracker:
         num_steps_snn: int = 1,
         chl_steps: Optional[int] = None,
         is_ff_step: bool = False,
+        **kwargs: Any,
     ) -> Dict[str, float]:
         """
-        Calcola la ripartizione esatta dei MAC equivalenti per il batch corrente.
-        Restituisce un dizionario con 'fwd', 'bwd', 'opt' e 'total'.
+        Calcolo del budget sinaptico teorico stimato in MAC equivalenti:
+          - ANN / KAN / LTC: C_fwd = 1.0 * base, C_bwd = 2.0 * base
+          - SNN (BPTT): C_fwd = T * F_analogico + 0.50 * r * T * F_spiking; C_bwd = 2.0 * T * base
+          - SNN (STDP): C_fwd = 0.50 * r_pre * T * base; C_bwd = 0.50 * (r_pre + r_post) * T * base (NO BPTT)
+          - FF-MLP: C_fwd = 2.0 * base, C_bwd = 2.0 * base
+          - FF-ResNet: C_fwd = 2.0 * base, C_bwd = 4.0 * base (con backward intra-blocco)
+          - CHL: C_fwd = 2.0 * T_steps * base, C_bwd = 2.0 * base (2 correlazioni)
         """
-        # 1. Costo di aggiornamento dei pesi (C_opt)
-        if not self.include_optimizer or "chl" in self.paradigm:
-            c_opt = 0.0
-        elif "adam" in self.optimizer_type:
-            # AdamW: ~10 FLOP / parametro => ~2.5 MAC_eq
-            c_opt = 2.5 * self.num_params
-        else:
-            # SGD con momentum / standard: ~2-4 FLOP => ~0.5 - 1.0 MAC_eq
-            c_opt = 0.5 * self.num_params
-
-        # 2. Costo del Forward pass (C_fwd) e Backward pass (C_bwd)
+        base_fwd = self.static_fwd_macs * batch_size
         p = self.paradigm
 
-        if "snn" in p:
-            # SNN Forward: accumuli sparsi (SOP) convertiti via ALPHA_SOP (1 SOP = 0.5 MAC)
-            total_sops = firing_rate * num_steps_snn * self.static_fwd_macs * batch_size
-            c_fwd_synaptic = total_sops * self.ALPHA_SOP
-            # Dinamica di membrana dei neuroni (leak + reset): ~2 FLOPs = 1 MAC per neurone per time-step
-            c_fwd_soma = (self.num_neurons * num_steps_snn * batch_size) * self.ALPHA_SOP
-            c_fwd = c_fwd_synaptic + c_fwd_soma
-
-            # SNN Backward con BPTT e Surrogate Gradient:
-            # L'autograd retropropaga tensori densi in virgola mobile lungo tutti i T step temporali
-            c_bwd = 2.0 * (self.static_fwd_macs * batch_size) * num_steps_snn
-
+        if "stdp" in p:
+            # SNN con STDP (NO BPTT!):
+            # Forward: accumuli sinaptici guidati dagli spike pre-sinaptici (r_pre)
+            # Update: plasticità associativa guidata sia da eventi pre che post (LTP: s_post x A_pre, LTD: s_pre x A_post)
+            r_post = firing_rate
+            r_pre = kwargs.get("firing_rate_pre", 0.20)
+            c_fwd = 0.50 * r_pre * num_steps_snn * base_fwd
+            c_bwd = 0.50 * (r_pre + r_post) * num_steps_snn * base_fwd
+        elif "snn" in p:
+            # SNN con BPTT: primo layer analogico a costo pieno + layer interni a eventi (0.50 AC)
+            # C_fwd = T * F_analogico + 0.50 * r * T * F_spiking
+            f_analog = getattr(self, "first_layer_static_macs", 0) * batch_size
+            f_spiking = max(0, base_fwd - f_analog)
+            if f_analog > 0 and f_spiking > 0:
+                c_fwd = (num_steps_snn * f_analog) + (0.50 * firing_rate * num_steps_snn * f_spiking)
+            else:
+                c_fwd = 0.50 * firing_rate * num_steps_snn * base_fwd
+            c_bwd = 2.0 * base_fwd * num_steps_snn
+        elif "ff_resnet" in p:
+            # Forward-Forward ResNet: backward intra-blocco (2x fwd per passata)
+            c_fwd = 2.0 * base_fwd
+            c_bwd = 4.0 * base_fwd
         elif "ff" in p or is_ff_step:
-            # Forward-Forward: 2 passaggi per batch (positivo + negativo)
-            c_fwd = 2.0 * self.static_fwd_macs * batch_size
-            # Calcolo locale della goodness e gradienti dei singoli pesi (senza autograd globale)
-            c_bwd = 2.0 * self.static_fwd_macs * batch_size
-
+            # Forward-Forward MLP: strati lineari isolati
+            c_fwd = 2.0 * base_fwd
+            c_bwd = 2.0 * base_fwd
         elif "chl" in p:
-            # Contrastive Hebbian: rilassamento ricorrente (T_free + T_clamped)
-            steps_recurrent = chl_steps if chl_steps is not None else 50
-            c_fwd = steps_recurrent * self.static_fwd_macs * batch_size
-            # Aggiornamento locale Hebbiano delle covarianze tra attivazioni (prodotto esterno)
-            c_bwd = 1.0 * self.static_fwd_macs * batch_size
-
-        elif "kan" in p:
-            # KAN: le B-splines sono già computate in self.static_fwd_macs
-            c_fwd = self.static_fwd_macs * batch_size
-            c_bwd = 2.0 * c_fwd
-
-        elif "ltc" in p:
-            # LTC / Neural ODE: forward con sequenza temporale (default 16 steps)
-            t_ltc = getattr(self, "ltc_steps", 16)
-            c_fwd = self.static_fwd_macs * batch_size
-            c_bwd = 2.0 * c_fwd
-
+            # Contrastive Hebbian Learning: rilassamento bidirezionale + 2 correlazioni per dW
+            steps_rec = chl_steps if chl_steps is not None else 50
+            c_fwd = float(2.0 * steps_rec * base_fwd)
+            c_bwd = float(2.0 * base_fwd)
         else:
-            # Baseline ANN standard (MLP, CNN, ResNet con Backpropagation)
-            c_fwd = self.static_fwd_macs * batch_size
+            # Backpropagation standard (ANN, KAN, LTC)
+            c_fwd = float(base_fwd)
             c_bwd = 2.0 * c_fwd
 
-        c_total = c_fwd + c_bwd + c_opt
-        return {"fwd": c_fwd, "bwd": c_bwd, "opt": c_opt, "total": c_total}
+        return {"fwd": c_fwd, "bwd": c_bwd, "total": c_fwd + c_bwd}
 
     def step(
         self,
@@ -323,13 +284,9 @@ class BudgetTracker:
         chl_steps: Optional[int] = None,
         is_ff_step: bool = False,
         epoch: int = 1,
-        loss: Optional[float] = None,
-        acc: Optional[float] = None,
+        **kwargs: Any,
     ) -> bool:
-        """
-        Registra un batch di addestramento.
-        Restituisce True se il budget è stato raggiunto/superato (richiesta di interruzione).
-        """
+        """Registra un batch. Restituisce True se il budget è stato superato."""
         costs = self.compute_step_macs(
             batch_size=batch_size,
             firing_rate=firing_rate,
@@ -340,54 +297,53 @@ class BudgetTracker:
 
         self.cum_fwd_macs += costs["fwd"]
         self.cum_bwd_macs += costs["bwd"]
-        self.cum_opt_macs += costs["opt"]
         self.cum_macs += costs["total"]
         self.samples_seen += batch_size
         self.steps += 1
 
-        # Controllo raggiungimento budget
-        if self.enabled and self.target_macs is not None and self.cum_macs >= self.target_macs:
+        if self.enabled and self.target_macs and self.cum_macs >= self.target_macs:
             if not self.exhausted:
                 self.exhausted = True
                 self.stop_step = self.steps
                 self.stop_epoch = epoch
                 pct = (self.cum_macs / self.target_macs) * 100.0
-                print("\n" + "!" * 70)
+                print(f"\n{'!' * 70}")
                 print(f"[BudgetTracker] 🛑 BUDGET COMPUTAZIONALE RAGGIUNTO!")
-                print(f"[BudgetTracker] MAC_eq spesi: {self.cum_macs:.3e} / {self.target_macs:.3e} ({pct:.1f}%)")
+                print(f"[BudgetTracker] MAC teorici stimati: {self.cum_macs:.3e} / {self.target_macs:.3e} ({pct:.1f}%)")
                 print(f"[BudgetTracker] Campioni processati: {self.samples_seen:,} | Step: {self.steps} (Epoca: {epoch})")
-                print("!" * 70 + "\n")
+                print(f"{'!' * 70}\n")
             return True
 
         return False
 
     @property
     def is_exhausted(self) -> bool:
-        """Restituisce True se il budget è stato superato."""
         return self.exhausted
 
     def print_summary(self) -> None:
-        """Stampa un riepilogo scientifico ed elegante del costo di addestramento."""
+        """Stampa un riepilogo scientifico del costo di addestramento."""
         total = max(1.0, self.cum_macs)
         pct_fwd = (self.cum_fwd_macs / total) * 100.0
         pct_bwd = (self.cum_bwd_macs / total) * 100.0
-        pct_opt = (self.cum_opt_macs / total) * 100.0
 
+        status = "RAGGIUNTO (Stop)" if self.exhausted else ("IN CORSO" if self.enabled else "DISATTIVATO")
         print("\n" + "=" * 65)
-        print("          RIEPILOGO BUDGET COMPUTAZIONALE (MAC_eq)")
+        print("    RIEPILOGO BUDGET COMPUTAZIONALE (Budget Sinaptico Teorico MAC_eq)")
         print("=" * 65)
         print(f"  Paradigma di calcolo:       {self.paradigm.upper()}")
-        print(f"  Stato del vincolo:          {'RAGGIUNTO (Stop)' if self.exhausted else ('IN CORSO' if self.enabled else 'DISATTIVATO')}")
+        print(f"  Stato del vincolo:          {status}")
         if self.target_macs:
             print(f"  Budget prefissato:          {self.target_macs:.3e} MAC_eq")
-        print(f"  MAC_eq totali accumulati:   {self.cum_macs:.3e} MAC_eq")
+        print(f"  MAC_eq totali stimati:      {self.cum_macs:.3e} MAC_eq")
         print(f"  Campioni di training visti: {self.samples_seen:,}")
         print(f"  Step di ottimizzazione:     {self.steps:,}")
         print("-" * 65)
         print("  Ripartizione del Costo di Addestramento:")
         print(f"    - Forward pass (C_fwd):   {self.cum_fwd_macs:.3e} MAC_eq  ({pct_fwd:5.1f}%)")
-        print(f"    - Backward pass (C_bwd):  {self.cum_bwd_macs:.3e} MAC_eq  ({pct_bwd:5.1f}%)")
-        print(f"    - Weight update (C_opt):  {self.cum_opt_macs:.3e} MAC_eq  ({pct_opt:5.1f}%)")
+        print(f"    - Backward/Update (C_bwd):{self.cum_bwd_macs:.3e} MAC_eq  ({pct_bwd:5.1f}%)")
+        print("-" * 65)
+        print("  * Nota: il conteggio sparso SNN presuppone di saltare le operazioni")
+        print("    associate agli spike assenti (zeri).")
         print("=" * 65 + "\n")
 
     def export_csv(self, filepath: Optional[Union[str, Path]] = None) -> Path:
@@ -397,8 +353,7 @@ class BudgetTracker:
 
         fieldnames = [
             "tag", "paradigm", "target_macs", "cum_macs", "cum_fwd_macs",
-            "cum_bwd_macs", "cum_opt_macs", "samples_seen", "steps",
-            "budget_exhausted"
+            "cum_bwd_macs", "samples_seen", "steps", "budget_exhausted"
         ]
         row = {
             "tag": self.tag,
@@ -407,7 +362,6 @@ class BudgetTracker:
             "cum_macs": round(self.cum_macs, 2),
             "cum_fwd_macs": round(self.cum_fwd_macs, 2),
             "cum_bwd_macs": round(self.cum_bwd_macs, 2),
-            "cum_opt_macs": round(self.cum_opt_macs, 2),
             "samples_seen": self.samples_seen,
             "steps": self.steps,
             "budget_exhausted": self.exhausted,
@@ -430,44 +384,29 @@ def get_budget_tracker(
     sample_input: Optional[torch.Tensor] = None,
     profiler: Optional[Any] = None,
 ) -> Optional[BudgetTracker]:
-    """
-    Costruttore unificato: estrae i parametri di configurazione da `args`,
-    crea o recupera il `BudgetTracker` e vi collega il modello.
-    """
-    # 1. Se il profiler contiene già un'istanza, riutilizzala
+    """Crea o recupera il BudgetTracker da args/profiler e collega il modello se fornito."""
     if profiler is not None and getattr(profiler, "budget_tracker", None) is not None:
         tracker = profiler.budget_tracker
         if model is not None and tracker.static_fwd_macs == 0:
             tracker.attach_model(model, sample_input=sample_input, device=device)
         return tracker
 
-    # 2. Estrazione configurazione da args.budget
     b_cfg = getattr(args, "budget", None)
-    enabled = getattr(b_cfg, "enabled", False) if b_cfg is not None else False
-    max_macs = getattr(b_cfg, "max_macs", None) if b_cfg is not None else None
-    inc_opt = getattr(b_cfg, "include_optimizer", True) if b_cfg is not None else True
-
     tag = f"{paradigm or getattr(args, 'paradigm', 'model')}"
     if hasattr(args, "dataset") and hasattr(args.dataset, "name"):
         tag += f"_{args.dataset.name}"
 
-    out_dir = getattr(args, "results_dir", None)
-
     tracker = BudgetTracker(
-        target_macs=max_macs,
-        enabled=enabled,
+        target_macs=getattr(b_cfg, "max_macs", None) if b_cfg else None,
+        enabled=getattr(b_cfg, "enabled", False) if b_cfg else False,
         paradigm=paradigm or getattr(args, "paradigm", "ann"),
-        include_optimizer=inc_opt,
         tag=tag,
-        output_dir=out_dir,
+        output_dir=getattr(args, "results_dir", None),
     )
 
     if model is not None:
         tracker.attach_model(model, sample_input=sample_input, device=device)
-
-    # Collega al profiler se disponibile
     if profiler is not None:
         profiler.budget_tracker = tracker
 
     return tracker
-
