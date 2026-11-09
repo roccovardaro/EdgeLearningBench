@@ -7,7 +7,6 @@ Implementazione bio-ispirata per apprendimento non supervisionato:
 - Plasticità locale STDP moltiplicativa (STDPLearner) con normalizzazione sinaptica
 - Assegnazione classi per voting neuronale (Diehl & Cook 2015)
 """
-
 import math
 import time
 from typing import Optional, Tuple
