@@ -34,10 +34,12 @@ def get_args():
     parser.add_argument("--device", default=None, help="Dispositivo di calcolo (cpu, mps, cuda, auto)")
     parser.add_argument("--paradigm", default=None, help="Paradigma di calcolo/modello")
     parser.add_argument(
+        "--mac",
         "--max_macs",
         type=float,
-        default=None,
-        help="Budget massimo di MAC equivalenti (es. 1e14 o 5e12). Se specificato, attiva automaticamente il budget.",
+        default=0.0,
+        dest="mac",
+        help="Budget massimo di operazioni MAC (default: 0). Se 0, budget_tracker non è attivo.",
     )
     parser.add_argument(
         "--budget_enabled",
@@ -80,7 +82,7 @@ def get_args():
     if "budget" not in config or not isinstance(config["budget"], dict):
         config["budget"] = {
             "enabled": False,
-            "max_macs": None,
+            "max_macs": 0.0,
             "include_optimizer": True,
             "export_csv": True,
         }
@@ -90,14 +92,21 @@ def get_args():
         try:
             config["budget"]["max_macs"] = float(config["budget"]["max_macs"])
         except (ValueError, TypeError):
-            pass
+            config["budget"]["max_macs"] = 0.0
 
-    # Override da CLI
-    if cli_args.max_macs is not None:
-        config["budget"]["max_macs"] = float(cli_args.max_macs)
-        config["budget"]["enabled"] = True
+    # Override da CLI con --mac: valore 0 (o <= 0) => budget_tracker non attivo
+    if cli_args.mac is not None:
+        if cli_args.mac > 0:
+            config["budget"]["max_macs"] = float(cli_args.mac)
+            config["budget"]["enabled"] = True
+        else:
+            config["budget"]["max_macs"] = 0.0
+            config["budget"]["enabled"] = False
+
     if cli_args.budget_enabled is not None:
         config["budget"]["enabled"] = cli_args.budget_enabled
+
+    config["mac"] = config["budget"]["max_macs"]
 
     args = to_namespace(config)
     return args

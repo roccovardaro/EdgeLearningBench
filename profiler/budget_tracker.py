@@ -312,6 +312,9 @@ class BudgetTracker:
 
         return False
 
+    def __bool__(self) -> bool:
+        return self.enabled
+
     @property
     def is_exhausted(self) -> bool:
         return self.exhausted
@@ -383,6 +386,10 @@ def get_budget_tracker(
         return tracker
 
     b_cfg = getattr(args, "budget", None)
+    enabled = getattr(b_cfg, "enabled", False) if b_cfg else False
+    max_macs = getattr(b_cfg, "max_macs", None) if b_cfg else None
+    if not enabled or not max_macs or float(max_macs) <= 0:
+        return None
     tag = f"{paradigm or getattr(args, 'paradigm', 'model')}"
     if hasattr(args, "dataset") and hasattr(args.dataset, "name"):
         tag += f"_{args.dataset.name}"

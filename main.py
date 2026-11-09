@@ -46,13 +46,14 @@ def main(args):
 
     # Setup Budget Tracker (controllo budget computazionale fisso)
     b_cfg = getattr(args, "budget", None)
+    budget_enabled = getattr(b_cfg, "enabled", False) and (getattr(b_cfg, "max_macs", 0) or 0) > 0
     budget_tracker = BudgetTracker(
         target_macs=getattr(b_cfg, "max_macs", None),
-        enabled=getattr(b_cfg, "enabled", False),
+        enabled=True,
         paradigm=paradigm,
         tag=tag,
         output_dir=RESULTS_DIR,
-    ) if b_cfg else None
+    ) if (b_cfg and budget_enabled) else None
 
     if budget_tracker:
         paradigm_args.budget_tracker = budget_tracker
@@ -60,6 +61,8 @@ def main(args):
             train_prof = TrainEvalProfiler(tag=tag, output_dir=RESULTS_DIR)
         if train_prof:
             train_prof.budget_tracker = budget_tracker
+    else:
+        paradigm_args.budget_tracker = None
 
     if edge_prof:
         edge_prof.start()
@@ -79,7 +82,7 @@ def main(args):
         if train_prof and getattr(te_cfg, "export_csv", True):
             train_prof.export_csv()
 
-        if budget_tracker and (budget_tracker.enabled or budget_tracker.cum_macs > 0):
+        if budget_tracker and budget_tracker.enabled:
             budget_tracker.print_summary()
             if getattr(b_cfg, "export_csv", True):
                 budget_tracker.export_csv()

@@ -13,6 +13,6 @@ train_eval_profiler:
 
 # ── Configurazione Budget Computazionale Fisso (MAC Teorici) ──────────
 budget:
-  enabled: true          # true: interrompe l'addestramento al raggiungimento del budget; false: addestramento canonico
-  max_macs: 1.0e12       # Numero totale di MAC aritmetici teorici consentiti (es. 1.0e11, 5.0e12)
+  enabled: false         # true: interrompe l'addestramento al raggiungimento del budget; false: addestramento canonico
+  max_macs: 0.0          # Numero totale di MAC aritmetici teorici consentiti (es. 1.0e11, 5.0e12); 0 = disattivo
   export_csv: true       # Salva il report riassuntivo del budget in results/

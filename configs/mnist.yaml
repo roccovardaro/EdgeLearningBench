@@ -339,7 +339,6 @@ snn_stdp:
     calibration_samples: 2000
   eval:
     batch_size: 128
-
     test_samples: 10000
 
 

@@ -18,10 +18,19 @@ def main():
         default="auto",
         help="Dispositivo di calcolo (cpu, mps, cuda, auto; default: auto)",
     )
+    parser.add_argument(
+        "--mac",
+        "--max_macs",
+        dest="mac",
+        type=float,
+        default=0.0,
+        help="Budget massimo di operazioni MAC (default: 0). Se 0, budget_tracker non è attivo.",
+    )
     args = parser.parse_args()
 
     device = str(get_device(args.device))
-    print(f"Dataset: {args.dataset} | Dispositivo: {device}")
+    mac_info = f"{args.mac:.2e} MAC" if args.mac > 0 else "Disattivo (0)"
+    print(f"Dataset: {args.dataset} | Dispositivo: {device} | Budget MAC: {mac_info}")
     results = {}
 
     for paradigm in get_paradigm_list():
@@ -32,6 +41,7 @@ def main():
             "--dataset", args.dataset,
             "--paradigm", paradigm,
             "--device", device,
+            "--mac", str(args.mac),
         ]
 
         start = time.time()
