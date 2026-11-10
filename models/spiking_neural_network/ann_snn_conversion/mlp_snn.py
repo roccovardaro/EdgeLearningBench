@@ -67,7 +67,7 @@ def prepare_mlp_for_snn(model):
     return model
 
 
-def convert_mlp_to_snn(ann_model, train_loader, device, mode="99.9%", num_calib_batches=10):
+def convert_mlp_to_snn(ann_model, train_loader, device, mode="99.9%", num_calib_batches=32):
     """Converte la MLP addestrata in SNN calibrando le soglie di sparo sul train_loader."""
     ann_model = prepare_mlp_for_snn(ann_model)
 
@@ -84,13 +84,15 @@ def convert_mlp_to_snn(ann_model, train_loader, device, mode="99.9%", num_calib_
 
 
 @torch.no_grad()
-def evaluate_mlp_snn(snn_model, test_loader, device, T=32):
+def evaluate_mlp_snn(snn_model, test_loader, device, T=32, snn_prof=None):
     """Valuta la SNN convertita accumulando le uscite su T timestep temporali."""
     snn_model.eval()
     correct, total = 0, 0
 
     for images, labels in test_loader:
         images, labels = images.to(device), labels.to(device)
+        if snn_prof is not None:
+            snn_prof.ensure_static_macs(images[:1])
 
         out_spikes_sum = 0.0
         for _ in range(T):
@@ -137,7 +139,7 @@ def mlp_snn_run(args, train_loader, test_loader, profiler=None, device=None):
     snn_prof = SNNProfiler(model=snn_model, tag="mlp_snn", output_dir=RESULTS_DIR, num_steps=T)
 
     # 3. Valuta la SNN
-    snn_acc = evaluate_mlp_snn(snn_model, test_loader, device, T=T)
+    snn_acc = evaluate_mlp_snn(snn_model, test_loader, device, T=T, snn_prof=snn_prof)
 
     # Calcolo ed esportazione metriche neuromorfiche
     snn_prof.log_epoch("test", tag="test")

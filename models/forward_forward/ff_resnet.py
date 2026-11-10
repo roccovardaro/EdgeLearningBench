@@ -146,12 +146,22 @@ class FFResNet(nn.Module):
             FFConvBlock(make_stage(16 + num_classes, 32, layers[1], 2), num_classes, threshold),
             FFConvBlock(make_stage(32 + num_classes, 64, layers[2], 2), num_classes, threshold),
         ])
+        self._trained_blocks = len(self.blocks)
         for module in self.modules():
             if isinstance(module, nn.Conv2d):
                 nn.init.kaiming_normal_(module.weight, mode="fan_out", nonlinearity="relu")
             elif isinstance(module, nn.BatchNorm2d):
                 nn.init.ones_(module.weight)
                 nn.init.zeros_(module.bias)
+
+    def forward(self, images, labels=None):
+        """Forward pass singolo attraverso tutti i blocchi (supporta profiling MAC statici)."""
+        if labels is None:
+            labels = torch.zeros(images.shape[0], dtype=torch.long, device=images.device)
+        features = images
+        for block in self.blocks:
+            features = block(features, labels)
+        return features
 
     def _candidate_goodness(self, images, n_blocks):
         """[B, classi, blocchi]; il chiamante gestisce eval/no_grad."""
@@ -167,15 +177,16 @@ class FFResNet(nn.Module):
 
     @torch.no_grad()
     def score(self, images, label):
-        """Goodness cumulativa escludendo il primo layer (label-dominated)."""
+        """Goodness cumulativa sui blocchi addestrati (escludendo blocco 0 se >= 2 blocchi addestrati)."""
         was_training = self.training
         self.eval()
         try:
+            n_blocks = max(1, min(self._trained_blocks, len(self.blocks)))
             features = images
             total = torch.zeros(images.shape[0], device=images.device)
-            for idx, block in enumerate(self.blocks):
+            for idx, block in enumerate(self.blocks[:n_blocks]):
                 features = block(features, label)
-                if idx == 0:
+                if n_blocks > 1 and idx == 0:
                     continue  # Il blocco 1 riflette la separazione triviale della label
                 total += block.goodness(features)
             return total
@@ -187,8 +198,12 @@ class FFResNet(nn.Module):
         was_training = self.training
         self.eval()
         try:
-            scores = self._candidate_goodness(images, len(self.blocks))
-            # Esclude il primo layer (indice 0) dalla somma della goodness
+            n_blocks = max(1, min(self._trained_blocks, len(self.blocks)))
+            scores = self._candidate_goodness(images, n_blocks)
+            if n_blocks <= 1:
+                # Se il budget ha interrotto prima del blocco 2, valuta il solo blocco 1 addestrato
+                return scores[:, :, 0].argmax(dim=1)
+            # Esclude il primo layer (indice 0) dalla somma della goodness sui blocchi addestrati
             return scores[:, :, 1:].sum(dim=2).argmax(dim=1)
         finally:
             self.train(was_training)
@@ -202,12 +217,10 @@ class FFResNet(nn.Module):
         self.eval()
         self.requires_grad_(False)
         self.history = []
+        self._trained_blocks = 0
 
         if budget_tracker is None and profiler is not None:
             budget_tracker = getattr(profiler, "budget_tracker", None)
-
-        if budget_tracker and budget_tracker.static_fwd_macs == 0:
-            budget_tracker.attach_model(self, device=device)
 
         budget_stop = False
         for block_idx, block in enumerate(self.blocks):
@@ -223,6 +236,9 @@ class FFResNet(nn.Module):
                     images = images.to(device)
                     labels = labels.to(device=device, dtype=torch.long)
                     bs = labels.shape[0]
+
+                    if budget_tracker and budget_tracker.static_fwd_macs == 0:
+                        budget_tracker.attach_model(self, sample_input=images[:1], device=device)
 
                     neg_labels = make_negative_labels(labels, self.num_classes)
                     paired_labels = torch.cat((labels, neg_labels), dim=0)
@@ -245,6 +261,7 @@ class FFResNet(nn.Module):
                     loss.backward()
                     nn.utils.clip_grad_norm_(block.parameters(), max_norm=5.0, error_if_nonfinite=True)
                     optimizer.step()
+                    self._trained_blocks = max(self._trained_blocks, block_idx + 1)
 
                     total_loss += loss.item() * bs
                     total_pos += g_pos.detach().sum().item()
@@ -252,7 +269,12 @@ class FFResNet(nn.Module):
                     total_pairs += (g_pos.detach() > g_neg.detach()).sum().item()
                     total_samples += bs
 
-                    if budget_tracker and budget_tracker.step(batch_size=bs, is_ff_step=True, epoch=epoch + 1):
+                    if budget_tracker and budget_tracker.step(
+                        batch_size=bs,
+                        is_ff_step=True,
+                        ff_stage_idx=block_idx,
+                        epoch=epoch + 1,
+                    ):
                         budget_stop = True
                         break
 
@@ -333,6 +355,7 @@ def ff_resnet_run(args, train_loader, test_loader, profiler=None, device=None):
         "model_state_dict": model.state_dict(),
         "model_config": model_config,
         "history": model.history,
+        "trained_blocks": model._trained_blocks,
         "train_accuracy": train_acc,
         "test_accuracy": test_acc,
     }, checkpoint_path)

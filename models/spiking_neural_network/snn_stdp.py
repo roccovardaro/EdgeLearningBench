@@ -446,6 +446,7 @@ def snn_stdp_run(args, train_loader, test_loader, profiler=None, device=None) ->
 
                 if budget_tracker and budget_tracker.static_fwd_macs == 0:
                     budget_tracker.attach_model(model, sample_input=images[:1], device=device)
+                snn_prof.ensure_static_macs(images[:1])
 
                 spk_out, _ = model.forward_and_update(images, learner=learner)
 

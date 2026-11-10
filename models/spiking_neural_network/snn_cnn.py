@@ -253,6 +253,7 @@ def snn_cnn_run(args, train_loader, test_loader, profiler=None, device=None):
 
             if budget_tracker and budget_tracker.static_fwd_macs == 0:
                 budget_tracker.attach_model(model, sample_input=images[:1], device=device)
+            snn_profiler.ensure_static_macs(images[:1])
 
             optimizer.zero_grad()
             spk_out, mem_out = model(images)

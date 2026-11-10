@@ -92,18 +92,24 @@ class FFNet(nn.Module):
             FFLayer(dims[i], dims[i + 1], threshold=threshold)
             for i in range(len(dims) - 1)
         ])
+        self._trained_layers = len(self.layers)
+
+    def forward(self, x):
+        """Forward pass sequenziale attraverso i layer (supporta profiling MAC statici)."""
+        x = x.flatten(1)
+        for layer in self.layers:
+            x = layer(x)
+        return x
 
     # ── Training ─────────────────────────────────────────────────────────
 
     def fit(self, train_loader, epochs_per_layer=100, lr=0.03, device=None, profiler=None, budget_tracker=None):
         device = get_device(device)
         self.to(device)
+        self._trained_layers = 0
 
         if budget_tracker is None and profiler is not None:
             budget_tracker = getattr(profiler, "budget_tracker", None)
-
-        if budget_tracker and budget_tracker.static_fwd_macs == 0:
-            budget_tracker.attach_model(self, device=device)
 
         budget_stop = False
         for layer_idx, layer in enumerate(self.layers):
@@ -116,6 +122,9 @@ class FFNet(nn.Module):
                 for images, labels in train_loader:
                     images, labels = images.to(device), labels.to(device)
                     bs = labels.shape[0]
+
+                    if budget_tracker and budget_tracker.static_fwd_macs == 0:
+                        budget_tracker.attach_model(self, sample_input=images[:1].flatten(1), device=device)
 
                     # Dati positivi e negativi
                     x_pos = overlay_y_on_x(images, labels, self.num_classes)
@@ -143,13 +152,19 @@ class FFNet(nn.Module):
                     optimizer.zero_grad()
                     loss.backward()
                     optimizer.step()
+                    self._trained_layers = max(self._trained_layers, layer_idx + 1)
 
                     # Statistiche
                     total_loss += loss.item() * bs
                     correct += (g_pos > g_neg).sum().item()
                     total += bs
 
-                    if budget_tracker and budget_tracker.step(batch_size=bs, is_ff_step=True, epoch=epoch + 1):
+                    if budget_tracker and budget_tracker.step(
+                        batch_size=bs,
+                        is_ff_step=True,
+                        ff_stage_idx=layer_idx,
+                        epoch=epoch + 1,
+                    ):
                         budget_stop = True
                         break
 
@@ -180,9 +195,10 @@ class FFNet(nn.Module):
     # ── Score ─────────────────────────────────────────────────────────────
 
     def score(self, x):
-        """Goodness cumulativa su tutti i layer."""
+        """Goodness cumulativa sui layer addestrati."""
+        n_layers = max(1, min(self._trained_layers, len(self.layers)))
         total = torch.zeros(x.shape[0], device=x.device)
-        for layer in self.layers:
+        for layer in self.layers[:n_layers]:
             x = layer(x)
             total += layer.goodness(x)
         return total
@@ -222,7 +238,8 @@ def ff_mlp_run(args, train_loader, test_loader, profiler=None, device=None):
     print(f"FF-MLP layers: {[input_dim] + list(hidden_dims) + [num_classes]}")
     print(f"Threshold: {threshold}")
     print(f"Parametri totali: {total_params:,}")
-    model.fit(train_loader, epochs_per_layer=epochs_per_layer, lr=lr, device=device, profiler=profiler)
+    budget_tracker = getattr(args, "budget_tracker", getattr(profiler, "budget_tracker", None))
+    model.fit(train_loader, epochs_per_layer=epochs_per_layer, lr=lr, device=device, profiler=profiler, budget_tracker=budget_tracker)
 
     train_acc = accuracy(model, train_loader, device=device)
     test_acc = accuracy(model, test_loader, device=device)

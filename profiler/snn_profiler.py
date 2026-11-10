@@ -31,6 +31,7 @@ class SNNProfiler:
         output_dir: Optional[Union[str, Path]] = None,
         model: Optional[nn.Module] = None,
         num_steps: Optional[int] = None,
+        sample_input: Optional[torch.Tensor] = None,
     ):
         self.tag = tag
         self.output_dir = Path(output_dir) if output_dir else Path.cwd() / "results"
@@ -44,11 +45,27 @@ class SNNProfiler:
         self._epoch_spikes = 0
         self._epoch_elements = 0
 
+        self._model = model
         self.num_steps = num_steps or (getattr(model, "num_steps", 1) if model else 1)
-        self.total_macs = compute_model_macs(model) if model is not None else 0 #Calcola una sola volta i MAC statici totali del modello
+        self._has_exact_macs = sample_input is not None
+        self.total_macs = (
+            compute_model_macs(model, sample_input=sample_input)
+            if model is not None
+            else 0
+        )
 
         if model is not None:
             self._attach_hooks(model)
+
+    def ensure_static_macs(self, sample_input: Optional[torch.Tensor] = None) -> None:
+        """Aggiorna `total_macs` usando un campione reale per ottenere la risoluzione esatta (es. 28x28 vs 32x32)."""
+        if self._model is not None and sample_input is not None and not self._has_exact_macs:
+            saved_spikes = self._epoch_spikes
+            saved_elements = self._epoch_elements
+            self.total_macs = compute_model_macs(self._model, sample_input=sample_input)
+            self._epoch_spikes = saved_spikes
+            self._epoch_elements = saved_elements
+            self._has_exact_macs = True
 
     def _attach_hooks(self, model: nn.Module):
         for m in model.modules():

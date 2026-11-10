@@ -55,6 +55,7 @@ class CHLNet(nn.Module):
         self.tol = tol
         self.checkpoint_name = checkpoint_name
         self.L = len(layer_sizes)
+        self.last_steps: int = 0
 
         # Matrici dei pesi [In, Out] e bias [Out] senza autograd
         self.W = nn.ParameterList([
@@ -118,8 +119,10 @@ class CHLNet(nn.Module):
             x[-1] = y_clamped.clone()
 
         stop = self.L - 1 if clamped else self.L
+        steps_done = 0
 
         for _ in range(steps):
+            steps_done += 1
             max_change = x0.new_zeros(())
 
             # Aggiornamento sequenziale layer-by-layer
@@ -141,6 +144,7 @@ class CHLNet(nn.Module):
             if tolerance is not None and max_change.item() < tolerance:
                 break
 
+        self.last_steps = steps_done
         return x
 
     def free_phase(self, x0: torch.Tensor, T: Optional[int] = None, tol: Optional[float] = None) -> List[torch.Tensor]:
@@ -280,6 +284,7 @@ def chl_run(args, train_loader, test_loader, profiler=None, device=None) -> CHLN
 
             # 1. Fase Libera (Negative Phase / Predizione)
             x_free = model.free_phase(x0)
+            free_steps = model.last_steps
 
             # Calcolo metriche batch
             preds = x_free[-1].argmax(dim=-1) #Predizione
@@ -292,6 +297,7 @@ def chl_run(args, train_loader, test_loader, profiler=None, device=None) -> CHLN
 
             # 2. Fase Bloccata (Positive Phase / Conduzione Target)
             x_clamped = model.clamped_phase(x0, y=y)
+            clamped_steps = model.last_steps
 
             # 3. Aggiornamento Locale Contrastivo Hebbiano
             dw = model.update(x_free, x_clamped, lr=lr)
@@ -300,7 +306,8 @@ def chl_run(args, train_loader, test_loader, profiler=None, device=None) -> CHLN
 
             if budget_tracker and budget_tracker.step(
                 batch_size=labels.size(0),
-                chl_steps=model.t_free + model.t_clamped,
+                chl_free_steps=free_steps,
+                chl_clamped_steps=clamped_steps,
                 epoch=epoch + 1,
             ):
                 budget_stop = True
