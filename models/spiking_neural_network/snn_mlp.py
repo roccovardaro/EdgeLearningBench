@@ -37,14 +37,17 @@ class SpikingMLP(nn.Module):
         beta=0.95,
         num_steps=25,
         dropout=0.2,
-        direct_input=None,
+        encoding="rate",
     ):
         super().__init__()
         self.input_dim = input_dim
         self.num_classes = num_classes
         self.num_steps = num_steps
         self.beta = beta
-        self.direct_input = bool(direct_input) if direct_input is not None else False
+        encoding = str(encoding).strip().lower()
+        if encoding not in ("direct", "rate"):
+            raise ValueError(f"Encoding non valido: {encoding!r}. Usa 'direct' oppure 'rate'.")
+        self.encoding = encoding
 
         # Relazione tau e decadimento beta: tau = 1 / (1 - beta)
         tau = 1.0 / (1.0 - beta) if (beta is not None and beta < 1.0) else 20.0
@@ -101,7 +104,7 @@ class SpikingMLP(nn.Module):
 
         # Propagazione temporale su num_steps timestep [num_steps, B, ...]
         x_seq = x.unsqueeze(0).repeat(self.num_steps, *([1] * x.ndim))
-        if self.direct_input:
+        if self.encoding == "direct":
             cur = self.flatten(x_seq)
         else:
             rate = x_seq.clamp(0.0, 1.0)
@@ -131,7 +134,7 @@ def build_snn_mlp(
     beta=0.95,
     num_steps=25,
     dropout=0.2,
-    direct_input=None,
+    encoding="rate",
 ):
     """Costruisce un SpikingMLP con i parametri specificati."""
     model = SpikingMLP(
@@ -141,11 +144,11 @@ def build_snn_mlp(
         beta=beta,
         num_steps=num_steps,
         dropout=dropout,
-        direct_input=direct_input,
+        encoding=encoding,
     )
     total_params = sum(p.numel() for p in model.parameters())
     print(f"SNN-MLP layers: {[input_dim] + list(hidden_dims) + [num_classes]}")
-    print(f"Timesteps: {num_steps} | Beta: {beta} (Tau: {model.tau:.2f}) | Dropout: {dropout} | DirectInput: {model.direct_input}")
+    print(f"Timesteps: {num_steps} | Beta: {beta} (Tau: {model.tau:.2f}) | Dropout: {dropout} | Encoding: {model.encoding}")
     print(f"Parametri totali: {total_params:,}")
     return model
 
@@ -163,7 +166,7 @@ def snn_mlp_run(args, train_loader, test_loader, profiler=None, device=None):
     beta = getattr(args.model, "beta", 0.95)
     num_steps = getattr(args.model, "num_steps", 25)
     dropout = getattr(args.model, "dropout", 0.2)
-    direct_input = getattr(args.model, "direct_input", None)
+    encoding = getattr(args.model, "encoding", "rate")
 
     device = get_device(device)
     if device.type == "mps":
@@ -178,7 +181,7 @@ def snn_mlp_run(args, train_loader, test_loader, profiler=None, device=None):
         beta=beta,
         num_steps=num_steps,
         dropout=dropout,
-        direct_input=direct_input,
+        encoding=encoding,
     ).to(device)
 
     optimizer, criterion = get_training_components(
@@ -271,6 +274,7 @@ def snn_mlp_run(args, train_loader, test_loader, profiler=None, device=None):
             "tau": model.tau,
             "num_steps": num_steps,
             "dropout": dropout,
+            "encoding": model.encoding,
             "backend": "spikingjelly",
         },
         "train_accuracy": train_acc,

@@ -52,7 +52,7 @@ kan:
     grid_size: 3
     spline_order: 3
     direct: false
-    bottleneck_dim: 16
+    bottleneck_dim: 8
     dropout: 0.1
     use_input_norm: true
     checkpoint_name: kan_wine_quality.pt
@@ -78,7 +78,7 @@ direct_kan:
     use_input_norm: true
     checkpoint_name: direct_kan_wine_quality.pt
   train:
-    epochs: 20
+    epochs: 17
     lr: 0.005
     batch_size: 64
     weight_decay: 0.0001
@@ -87,7 +87,7 @@ direct_kan:
     batch_size: 64
 
 
-# ── SNN-MLP (Spiking Neural Network con Direct Input) ────────
+# ── SNN-MLP (Spiking Neural Network) ────────────────────────
 snn_mlp:
   model:
     input_dim: 11
@@ -96,7 +96,7 @@ snn_mlp:
     beta: 0.90              # Decadimento membrana (tau = 10.0)
     num_steps: 10           # Timestep temporali
     dropout: 0.1
-    direct_input: true      # Direct current injection per dati tabellari continui
+    encoding: direct        # direct | rate (direct current injection per dati tabellari continui)
     checkpoint_name: snn_mlp_wine_quality.pt
   train:
     epochs: 30
@@ -114,8 +114,8 @@ ltc:
   model:
     input_dim: 11
     num_classes: 7
-    units: 32               # Neuroni nella cella LTC FullyConnected
-    num_steps: 10           # Timestep temporali sequenziali
+    units: 8                # Neuroni nella cella LTC FullyConnected
+    num_steps: 4            # Timestep temporali sequenziali
     dropout: 0.1
     checkpoint_name: ltc_wine_quality.pt
   train:

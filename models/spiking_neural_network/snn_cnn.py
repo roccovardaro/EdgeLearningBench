@@ -93,14 +93,17 @@ class SpikingCNN(nn.Module):
         beta=0.95,
         num_steps=25,
         dropout=0.2,
-        use_rate_coding=True,
+        encoding="rate",
     ):
         super().__init__()
         self.in_channels = in_channels
         self.num_classes = num_classes
         self.num_steps = num_steps
         self.beta = beta
-        self.use_rate_coding = use_rate_coding
+        encoding = str(encoding).strip().lower()
+        if encoding not in ("direct", "rate"):
+            raise ValueError(f"Encoding non valido: {encoding!r}. Usa 'direct' oppure 'rate'.")
+        self.encoding = encoding
 
         # Relazione tau e decadimento beta: tau = 1 / (1 - beta)
         tau = 1.0 / (1.0 - beta) if (beta is not None and beta < 1.0) else 20.0
@@ -150,10 +153,10 @@ class SpikingCNN(nn.Module):
 
         # Ripetizione temporale multi-step [num_steps, B, C, H, W]
         x_seq = x.unsqueeze(0).repeat(self.num_steps, *([1] * x.ndim))
-        if self.use_rate_coding:
+        if self.encoding == "rate":
             rate = x_seq.clamp(0.0, 1.0)
             cur = torch.bernoulli(rate)
-        else:
+        else: #direct encoding
             cur = x_seq
 
         # Propagazione attraverso i blocchi conv spiking
@@ -182,7 +185,7 @@ def build_snn_cnn(
     beta=0.95,
     num_steps=25,
     dropout=0.2,
-    use_rate_coding=True,
+    encoding="rate",
 ):
     """Costruisce un SpikingCNN con i parametri specificati."""
     model = SpikingCNN(
@@ -192,7 +195,7 @@ def build_snn_cnn(
         beta=beta,
         num_steps=num_steps,
         dropout=dropout,
-        use_rate_coding=use_rate_coding,
+        encoding=encoding,
     )
     total_params = sum(p.numel() for p in model.parameters())
     conv_params = sum(
@@ -200,7 +203,7 @@ def build_snn_cnn(
     )
     fc_params = sum(p.numel() for p in model.fc.parameters())
     print(f"SNN-CNN channels: {list(cnn_channels)}")
-    print(f"Timesteps: {num_steps} | Beta: {beta} (Tau: {model.tau:.2f}) | Dropout: {dropout} | Rate coding: {use_rate_coding}")
+    print(f"Timesteps: {num_steps} | Beta: {beta} (Tau: {model.tau:.2f}) | Dropout: {dropout} | Encoding: {model.encoding}")
     print(f"Parametri — Conv: {conv_params:,}  FC: {fc_params:,}  Totale: {total_params:,}")
     return model
 
@@ -218,7 +221,7 @@ def snn_cnn_run(args, train_loader, test_loader, profiler=None, device=None):
     beta = getattr(args.model, "beta", 0.95)
     num_steps = getattr(args.model, "num_steps", 25)
     dropout = getattr(args.model, "dropout", 0.2)
-    use_rate_coding = getattr(args.model, "use_rate_coding", True)
+    encoding = getattr(args.model, "encoding", "rate")
 
     device = get_device(device)
     if device.type == "mps":
@@ -233,7 +236,7 @@ def snn_cnn_run(args, train_loader, test_loader, profiler=None, device=None):
         beta=beta,
         num_steps=num_steps,
         dropout=dropout,
-        use_rate_coding=use_rate_coding,
+        encoding=encoding,
     ).to(device)
 
     optimizer, criterion = get_training_components(
@@ -327,7 +330,7 @@ def snn_cnn_run(args, train_loader, test_loader, profiler=None, device=None):
             "tau": model.tau,
             "num_steps": num_steps,
             "dropout": dropout,
-            "use_rate_coding": use_rate_coding,
+            "encoding": model.encoding,
             "backend": "spikingjelly",
         },
         "train_accuracy": train_acc,

@@ -103,7 +103,7 @@ direct_kan:
     batch_size: 128
 
 
-# ── SNN-MLP (Spiking Neural Network – Rate Coding) ───────────
+# ── SNN-MLP (Spiking Neural Network) ─────────────────────────
 snn_mlp:
   model:
     input_dim: 784
@@ -112,6 +112,7 @@ snn_mlp:
     beta: 0.95
     num_steps: 16
     dropout: 0.2
+    encoding: direct         # direct | rate
     checkpoint_name: snn_mlp_fashion_mnist.pt
   train:
     epochs: 25
@@ -232,6 +233,7 @@ snn_cnn:
     beta: 0.95
     num_steps: 8
     dropout: 0.2
+    encoding: direct         # direct | rate
     checkpoint_name: snn_cnn_fashion_mnist.pt
   train:
     epochs: 25
@@ -274,7 +276,7 @@ ff_resnet:
     threshold: 1.0
     checkpoint_name: ff_resnet_fashion_mnist.pt
   train:
-    epochs_per_layer: 25
+    epochs_per_layer: 6
     lr: 0.001
     batch_size: 128
   eval:
@@ -289,7 +291,7 @@ snn_resnet:
     layers: [3, 3, 3]          # SNN-ResNet-20
     beta: 0.95
     num_steps: 8
-    use_rate_coding: true
+    encoding: direct         # direct | rate
     checkpoint_name: snn_resnet_fashion_mnist.pt
   train:
     epochs: 25
@@ -321,10 +323,10 @@ snn_stdp:
     num_steps: 75
     checkpoint_name: snn_stdp_fashion_mnist.pt
   train:
-    epochs: 4
+    epochs: 6
     ltp: 0.000875
     batch_size: 32
-    train_samples: 10000
+    train_samples: 15000
     calibration_samples: 2000
   eval:
     batch_size: 128

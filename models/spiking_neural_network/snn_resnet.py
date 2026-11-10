@@ -106,7 +106,7 @@ class SpikingResNet(nn.Module):
         in_channels: int = 3,
         beta: float = 0.95,
         num_steps: int = 16,
-        use_rate_coding: bool = True,
+        encoding: str = "rate",
     ):
         super().__init__()
         self.inplanes = 16
@@ -114,7 +114,10 @@ class SpikingResNet(nn.Module):
         self.num_classes = num_classes
         self.num_steps = num_steps
         self.beta = beta
-        self.use_rate_coding = use_rate_coding
+        encoding = str(encoding).strip().lower()
+        if encoding not in ("direct", "rate"):
+            raise ValueError(f"Encoding non valido: {encoding!r}. Usa 'direct' oppure 'rate'.")
+        self.encoding = encoding
 
         # Relazione tau e decadimento beta: tau = 1 / (1 - beta)
         tau = 1.0 / (1.0 - beta) if (beta is not None and beta < 1.0) else 20.0
@@ -226,7 +229,7 @@ class SpikingResNet(nn.Module):
 
         # Ripetizione temporale multi-step [num_steps, B, C, H, W]
         x_seq = x.unsqueeze(0).repeat(self.num_steps, *([1] * x.ndim))
-        if self.use_rate_coding:
+        if self.encoding == "rate":
             rate = x_seq.clamp(0.0, 1.0)
             cur = torch.bernoulli(rate)
         else:
@@ -261,7 +264,7 @@ def _snn_resnet(
     in_channels: int = 3,
     beta: float = 0.95,
     num_steps: int = 16,
-    use_rate_coding: bool = True,
+    encoding: str = "rate",
     weights_path: Optional[str] = None,
     **kwargs: Any,
 ) -> SpikingResNet:
@@ -272,7 +275,7 @@ def _snn_resnet(
         in_channels=in_channels,
         beta=beta,
         num_steps=num_steps,
-        use_rate_coding=use_rate_coding,
+        encoding=encoding,
     )
 
     if weights_path is not None:
@@ -312,7 +315,7 @@ def snn_resnet(
     layers: Optional[List[int]] = None,
     beta: float = 0.95,
     num_steps: int = 16,
-    use_rate_coding: bool = True,
+    encoding: str = "rate",
     weights_path: Optional[str] = None,
     **kwargs: Any,
 ) -> SpikingResNet:
@@ -327,7 +330,7 @@ def snn_resnet(
         in_channels=in_channels,
         beta=beta,
         num_steps=num_steps,
-        use_rate_coding=use_rate_coding,
+        encoding=encoding,
         weights_path=weights_path,
         **kwargs,
     )
@@ -339,7 +342,7 @@ def build_snn_resnet(
     layers: Optional[List[int]] = None,
     beta: float = 0.95,
     num_steps: int = 16,
-    use_rate_coding: bool = True,
+    encoding: str = "rate",
     weights_path: Optional[str] = None,
 ) -> SpikingResNet:
     """Costruisce un SpikingResNet e stampa le statistiche dell'architettura."""
@@ -352,12 +355,12 @@ def build_snn_resnet(
         layers=layers,
         beta=beta,
         num_steps=num_steps,
-        use_rate_coding=use_rate_coding,
+        encoding=encoding,
         weights_path=weights_path,
     )
     total_params = sum(p.numel() for p in model.parameters())
     print(f"SNN-ResNet layers: {layers} (SNN-ResNet-{depth}) | in_channels={in_channels} | classes={num_classes}")
-    print(f"Timesteps: {num_steps} | Beta: {beta} (Tau: {model.tau:.2f}) | Rate coding: {use_rate_coding}")
+    print(f"Timesteps: {num_steps} | Beta: {beta} (Tau: {model.tau:.2f}) | Encoding: {model.encoding}")
     print(f"Parametri totali: {total_params:,}")
     return model
 
@@ -372,7 +375,7 @@ def snn_resnet_run(args, train_loader, test_loader, profiler=None, device=None):
     layers = list(getattr(args.model, "layers", [3, 3, 3]))
     beta = getattr(args.model, "beta", 0.95)
     num_steps = getattr(args.model, "num_steps", 16)
-    use_rate_coding = getattr(args.model, "use_rate_coding", True)
+    encoding = getattr(args.model, "encoding", "rate")
     weights_path = getattr(args.model, "weights_path", None)
 
     device = get_device(device)
@@ -387,7 +390,7 @@ def snn_resnet_run(args, train_loader, test_loader, profiler=None, device=None):
         layers=layers,
         beta=beta,
         num_steps=num_steps,
-        use_rate_coding=use_rate_coding,
+        encoding=encoding,
         weights_path=weights_path,
     ).to(device)
 
@@ -482,7 +485,7 @@ def snn_resnet_run(args, train_loader, test_loader, profiler=None, device=None):
             "beta": beta,
             "tau": model.tau,
             "num_steps": num_steps,
-            "use_rate_coding": use_rate_coding,
+            "encoding": model.encoding,
             "backend": "spikingjelly",
         },
         "train_accuracy": train_acc,

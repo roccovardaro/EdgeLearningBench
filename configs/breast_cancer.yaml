@@ -36,7 +36,7 @@ mlp:
     dropout: 0.2
     checkpoint_name: mlp_breast_cancer.pt
   train:
-    epochs: 40
+    epochs: 36
     lr: 0.005
     batch_size: 32
     weight_decay: 0.0001
@@ -79,7 +79,7 @@ direct_kan:
     use_input_norm: true
     checkpoint_name: direct_kan_breast_cancer.pt
   train:
-    epochs: 25
+    epochs: 24
     lr: 0.005
     batch_size: 32
     weight_decay: 0.0001
@@ -88,7 +88,7 @@ direct_kan:
     batch_size: 32
 
 
-# ── SNN-MLP (Spiking Neural Network con Direct Input) ─────────
+# ── SNN-MLP (Spiking Neural Network) ─────────────────────────
 snn_mlp:
   model:
     input_dim: 30
@@ -97,7 +97,7 @@ snn_mlp:
     beta: 0.90              # Decadimento membrana (tau = 10.0)
     num_steps: 10           # Timestep temporali
     dropout: 0.1
-    direct_input: true      # Direct current injection per feature continue
+    encoding: direct        # direct | rate (direct current injection per feature continue)
     checkpoint_name: snn_mlp_breast_cancer.pt
   train:
     epochs: 30
@@ -115,12 +115,12 @@ ltc:
   model:
     input_dim: 30
     num_classes: 2
-    units: 32               # Neuroni nella cella LTC FullyConnected
-    num_steps: 10           # Timestep temporali sequenziali
+    units: 16               # Neuroni nella cella LTC FullyConnected
+    num_steps: 4            # Timestep temporali sequenziali
     dropout: 0.1
     checkpoint_name: ltc_breast_cancer.pt
   train:
-    epochs: 25
+    epochs: 17
     lr: 0.005
     batch_size: 32
     weight_decay: 0.0001

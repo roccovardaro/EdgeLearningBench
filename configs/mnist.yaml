@@ -10,7 +10,7 @@
 dataset:
   name: mnist               # mnist | fashion_mnist | cifar10
   augmentation: false       # false di default per cifre; true applica RandomCrop(28, pad=2) + RandomRotation(10)
-  normalize: false           # Normalizzazione Z-score; impostare a false esclusivamente se si esegue snn_stdp
+  normalize: true           # Normalizzazione Z-score; impostare a false esclusivamente se si esegue snn_stdp
 
 # Paradigma attivo:
 # ff_mlp | ff_resnet | resnet | cnn | kan | direct_kan | mlp | cnn_kan |
@@ -106,7 +106,7 @@ direct_kan:
 
 
 
-# ── SNN-MLP (Spiking Neural Network – Rate Coding) ───────────
+# ── SNN-MLP (Spiking Neural Network) ─────────────────────────
 snn_mlp:
   model:
     input_dim: 784
@@ -115,6 +115,7 @@ snn_mlp:
     beta: 0.95
     num_steps: 16
     dropout: 0.2
+    encoding: direct         # direct | rate
     checkpoint_name: snn_mlp_mnist.pt
   train:
     epochs: 15
@@ -240,9 +241,10 @@ snn_cnn:
     beta: 0.95
     num_steps: 4
     dropout: 0.2
+    encoding: direct         # direct | rate
     checkpoint_name: snn_cnn_mnist.pt
   train:
-    epochs: 10
+    epochs: 15
     lr: 0.002
     batch_size: 128
     weight_decay: 0.0001
@@ -283,7 +285,7 @@ ff_resnet:
     threshold: 1.0
     checkpoint_name: ff_resnet_mnist.pt
   train:
-    epochs_per_layer: 20
+    epochs_per_layer: 4
     lr: 0.001
     batch_size: 128
   eval:
@@ -299,7 +301,7 @@ snn_resnet:
     layers: [3, 3, 3]          # SNN-ResNet-20
     beta: 0.95
     num_steps: 8
-    use_rate_coding: true
+    encoding: direct         # direct | rate
     checkpoint_name: snn_resnet_mnist.pt
   train:
     epochs: 15
@@ -332,10 +334,10 @@ snn_stdp:
     num_steps: 32
     checkpoint_name: snn_stdp_mnist.pt
   train:
-    epochs: 4
+    epochs: 6
     ltp: 0.000875
     batch_size: 32
-    train_samples: 10000
+    train_samples: 30000
     calibration_samples: 2000
   eval:
     batch_size: 128
@@ -350,7 +352,7 @@ mlp_snn:
     hidden_dims: [512, 256]
     baseline_checkpoint: mlp_mnist.pt
     checkpoint_name: mlp_snn_mnist.pt
-    num_steps: 4
+    num_steps: 32
     conversion_mode: "99.9%"
   train:
     batch_size: 128

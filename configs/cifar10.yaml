@@ -107,7 +107,7 @@ direct_kan:
     batch_size: 128
 
 
-# ── SNN-MLP (Spiking Neural Network – Rate Coding) ───────────
+# ── SNN-MLP (Spiking Neural Network) ─────────────────────────
 # Capacità: ~1.71M parametri (3072 → 512 → 256 → 10 con LIF)
 snn_mlp:
   model:
@@ -117,6 +117,7 @@ snn_mlp:
     beta: 0.95
     num_steps: 5
     dropout: 0.2
+    encoding: direct         # direct | rate
     checkpoint_name: snn_mlp_cifar10.pt
   train:
     epochs: 30
@@ -224,7 +225,7 @@ cnn_ltc:
     dropout: 0.2
     checkpoint_name: cnn_ltc_cifar10.pt
   train:
-    epochs: 20
+    epochs: 30
     lr: 0.001
     batch_size: 64
     weight_decay: 0.0001
@@ -242,6 +243,7 @@ snn_cnn:
     beta: 0.95
     num_steps: 5
     dropout: 0.2
+    encoding: direct         # direct | rate
     checkpoint_name: snn_cnn_cifar10.pt
   train:
     epochs: 30
@@ -259,13 +261,13 @@ snn_cnn:
 # TRACCIA 3: RESIDUAL NETWORKS (Confronto Deep Residual)
 # ==============================================================================
 
-# ── ResNet-56 (Backpropagation Standard) ─────────────────────
-# Architettura deep residual per CIFAR-10 (~855k parametri)
+# ── ResNet-20 (Backpropagation Standard) ─────────────────────
+# Architettura deep residual per CIFAR-10 (~272k parametri)
 resnet:
   model:
     in_channels: 3           # 3 canali RGB CIFAR-10
     num_classes: 10
-    layers: [3, 3, 3]        # ResNet-56 (oppure [5, 5, 5] per ResNet-32, [3, 3, 3] per ResNet-20)
+    layers: [3, 3, 3]        # ResNet-20 (oppure [5, 5, 5] per ResNet-32, [9, 9, 9] per ResNet-56)
     checkpoint_name: resnet_cifar10.pt
   train:
     epochs: 30
@@ -285,7 +287,7 @@ ff_resnet:
     threshold: 1.0
     checkpoint_name: ff_resnet_cifar10.pt
   train:
-    epochs_per_layer: 30
+    epochs_per_layer: 8
     lr: 0.001
     batch_size: 128
   eval:
@@ -301,7 +303,7 @@ snn_resnet:
     layers: [3, 3, 3]        # SNN-ResNet-20 compatto
     beta: 0.95
     num_steps: 8
-    use_rate_coding: true
+    encoding: direct         # direct | rate
     checkpoint_name: snn_resnet_cifar10.pt
   train:
     epochs: 30
@@ -336,7 +338,7 @@ snn_stdp:
     epochs: 8
     ltp: 0.000875
     batch_size: 32
-    train_samples: 10000
+    train_samples: 20000
     calibration_samples: 2000
   eval:
     batch_size: 128
@@ -351,7 +353,7 @@ mlp_snn:
     hidden_dims: [512, 256]
     baseline_checkpoint: mlp_cifar10.pt
     checkpoint_name: mlp_snn_cifar10.pt
-    num_steps: 2
+    num_steps: 32
     conversion_mode: "99.9%"
   train:
     batch_size: 128

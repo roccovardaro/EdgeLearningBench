@@ -95,7 +95,7 @@ direct_kan:
     batch_size: 256
 
 
-# ── SNN-MLP (Spiking Neural Network con Direct Input) ─────────
+# ── SNN-MLP (Spiking Neural Network) ─────────────────────────
 snn_mlp:
   model:
     input_dim: 108
@@ -104,7 +104,7 @@ snn_mlp:
     beta: 0.90              # Decadimento membrana (tau = 10.0)
     num_steps: 10           # Timestep temporali
     dropout: 0.1
-    direct_input: true      # Direct current injection per dati continui e tabellari
+    encoding: direct        # direct | rate (direct current injection per dati continui e tabellari)
     checkpoint_name: snn_mlp_adult.pt
   train:
     epochs: 15
@@ -127,7 +127,7 @@ ltc:
     dropout: 0.1
     checkpoint_name: ltc_adult.pt
   train:
-    epochs: 15
+    epochs: 13
     lr: 0.003
     batch_size: 128
     weight_decay: 0.0001
