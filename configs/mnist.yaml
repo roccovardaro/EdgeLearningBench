@@ -11,6 +11,7 @@ dataset:
   name: mnist               # mnist | fashion_mnist | cifar10
   augmentation: false       # false di default per cifre; true applica RandomCrop(28, pad=2) + RandomRotation(10)
   normalize: true           # Normalizzazione Z-score; impostare a false esclusivamente se si esegue snn_stdp
+  num_workers: 0            # Worker DataLoader (0 di default; es. 2 su Colab/Linux)
 
 # Paradigma attivo:
 # ff_mlp | ff_resnet | resnet | cnn | kan | direct_kan | mlp | cnn_kan |

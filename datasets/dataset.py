@@ -13,6 +13,7 @@ def get_dataloaders(args):
 
     augment = getattr(args.dataset, "augmentation", False)
     normalize = getattr(args.dataset, "normalize", True)
+    num_workers = max(0, int(getattr(args.dataset, "num_workers", 0) or 0))
 
     dataset_name = getattr(args.dataset, "name", "").lower().replace("-", "_")
 
@@ -22,6 +23,7 @@ def get_dataloaders(args):
             test_batch_size=eval_bs,
             augment=augment,
             normalize=normalize,
+            num_workers=num_workers,
         )
     if dataset_name == "cifar10":
         return cifar10_dataloaders(
@@ -29,6 +31,7 @@ def get_dataloaders(args):
             test_batch_size=eval_bs,
             augment=augment,
             normalize=normalize,
+            num_workers=num_workers,
         )
     if dataset_name in "fashion_mnist":
         return fashion_mnist_dataloaders(
@@ -36,6 +39,7 @@ def get_dataloaders(args):
             test_batch_size=eval_bs,
             augment=augment,
             normalize=normalize,
+            num_workers=num_workers,
         )
     if dataset_name in "wine_quality":
         test_ratio = getattr(args.dataset, "test_ratio", 0.2)
@@ -49,6 +53,7 @@ def get_dataloaders(args):
             seed=seed,
             normalize=normalize,
             stratified=stratified,
+            num_workers=num_workers,
         )
     if dataset_name in "breast_cancer":
         test_ratio = getattr(args.dataset, "test_ratio", 0.2)
@@ -62,6 +67,7 @@ def get_dataloaders(args):
             seed=seed,
             normalize=normalize,
             stratified=stratified,
+            num_workers=num_workers,
         )
     if dataset_name in "adult":
         split = getattr(args.dataset, "split", "official")
@@ -77,6 +83,7 @@ def get_dataloaders(args):
             seed=seed,
             normalize=normalize,
             feature_mode=feature_mode,
+            num_workers=num_workers,
         )
     return None
 

@@ -20,6 +20,7 @@ dataset:
   normalize: true           # Standardizzazione Z-score delle colonne numeriche (fit solo sul train)
   feature_mode: all         # all (108 feature: continue + one-hot) | numerical (6 feature continue)
   augmentation: false
+  num_workers: 0            # Worker DataLoader (0 di default; es. 2 su Colab/Linux)
 
 # Paradigma attivo:
 # mlp | kan | direct_kan | snn_mlp | ltc | ff_mlp

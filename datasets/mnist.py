@@ -22,6 +22,7 @@ class MNISTData:
         self.num_workers = num_workers
         self.image_size = image_size
 
+        resize = [transforms.Resize((self.image_size, self.image_size), antialias=True)] if self.image_size != 28 else []
         norm = [transforms.Normalize(mean=mean, std=std)] if normalize else []
         aug = [
             transforms.RandomCrop(self.image_size, padding=2),
@@ -29,13 +30,13 @@ class MNISTData:
         ] if augment else []
 
         self.train_transform = transforms.Compose([
-            transforms.Resize((self.image_size, self.image_size), antialias=True),
+            *resize,
             *aug,
             transforms.ToTensor(),
             *norm,
         ])
         self.test_transform = transforms.Compose([
-            transforms.Resize((self.image_size, self.image_size), antialias=True),
+            *resize,
             transforms.ToTensor(),
             *norm,
         ])
@@ -62,6 +63,7 @@ class MNISTData:
             batch_size=batch_size,
             shuffle=shuffle,
             num_workers=self.num_workers,
+            persistent_workers=self.num_workers > 0,
         )
 
     def train_dataloader(self):

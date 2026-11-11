@@ -152,6 +152,7 @@ class BreastCancerData:
             batch_size=batch_size,
             shuffle=shuffle,
             num_workers=self.num_workers,
+            persistent_workers=self.num_workers > 0,
         )
 
     def train_dataloader(self):
