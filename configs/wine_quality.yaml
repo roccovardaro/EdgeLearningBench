@@ -13,7 +13,7 @@ dataset:
   stratified: true          # Split stratificato per bilanciamento classi
   normalize: true           # Standardizzazione Z-score (fit calcolato solo sul train)
   augmentation: false
-  num_workers: 0            # Worker DataLoader (0 di default; es. 2 su Colab/Linux)
+  num_workers: 2            # Worker DataLoader (0 di default; es. 2 su Colab/Linux)
 
 # Paradigma attivo:
 # mlp | kan | direct_kan | snn_mlp | ltc | ff_mlp | chl

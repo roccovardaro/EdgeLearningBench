@@ -12,7 +12,7 @@ dataset:
   name: fashion_mnist       # mnist | fashion_mnist | cifar10
   augmentation: true        # Data augmentation abilitata (RandomCrop + RandomHorizontalFlip)
   normalize: true           # Normalizzazione Z-score (disattivare solo per snn_stdp)
-  num_workers: 0            # Worker DataLoader (0 di default; es. 2 su Colab/Linux)
+  num_workers: 2            # Worker DataLoader (0 di default; es. 2 su Colab/Linux)
 
 # Paradigma attivo:
 # ff_mlp | ff_resnet | resnet | cnn | kan | direct_kan | mlp | cnn_kan |
