@@ -16,7 +16,7 @@ dataset:
   num_workers: 2            # Worker DataLoader (0 di default; es. 2 su Colab/Linux)
 
 # Paradigma attivo:
-# mlp | kan | direct_kan | snn_mlp | ltc | ff_mlp | chl
+# mlp | kan | direct_kan | snn_mlp | mlp_snn | ltc | ff_mlp | chl
 paradigm: mlp
 
 # Dispositivo di calcolo: auto | cpu | mps | cuda | cuda:0
@@ -36,7 +36,7 @@ mlp:
     dropout: 0.1
     checkpoint_name: mlp_wine_quality.pt
   train:
-    epochs: 50
+    epochs: 30
     lr: 0.005
     batch_size: 64
     weight_decay: 0.0001
@@ -53,7 +53,7 @@ kan:
     grid_size: 3
     spline_order: 3
     direct: false
-    bottleneck_dim: 8
+    bottleneck_dim: 16
     dropout: 0.1
     use_input_norm: true
     checkpoint_name: kan_wine_quality.pt
@@ -61,8 +61,8 @@ kan:
     epochs: 20
     lr: 0.005
     batch_size: 64
-    weight_decay: 0.001
-    regularization_lambda: 0.005
+    weight_decay: 0.0001
+    regularization_lambda: 0.001
   eval:
     batch_size: 64
 
@@ -75,15 +75,15 @@ direct_kan:
     hidden_dims: [16, 8]
     grid_size: 3
     spline_order: 3
-    dropout: 0.0
+    dropout: 0.1
     use_input_norm: true
     checkpoint_name: direct_kan_wine_quality.pt
   train:
-    epochs: 17
+    epochs: 20
     lr: 0.005
     batch_size: 64
     weight_decay: 0.0001
-    regularization_lambda: 0.005
+    regularization_lambda: 0.001
   eval:
     batch_size: 64
 
@@ -93,7 +93,7 @@ snn_mlp:
   model:
     input_dim: 11
     num_classes: 7
-    hidden_dims: [32, 16]
+    hidden_dims: [64, 32]
     beta: 0.90              # Decadimento membrana (tau = 10.0)
     num_steps: 10           # Timestep temporali
     dropout: 0.1
@@ -110,12 +110,28 @@ snn_mlp:
     batch_size: 64
 
 
+# ── MLP-SNN (Conversione ANN-to-SNN via SpikingJelly) ─────────
+mlp_snn:
+  model:
+    input_dim: 11
+    num_classes: 7
+    hidden_dims: [64, 32]
+    baseline_checkpoint: mlp_wine_quality.pt
+    checkpoint_name: mlp_snn_wine_quality.pt
+    num_steps: 32
+    conversion_mode: "99.9%"
+  train:
+    batch_size: 64
+  eval:
+    batch_size: 64
+
+
 # ── LTC (Liquid Time-Constant Network con dinamica ODE continua) ─
 ltc:
   model:
     input_dim: 11
     num_classes: 7
-    units: 8                # Neuroni nella cella LTC FullyConnected
+    units: 16               # Neuroni nella cella LTC FullyConnected
     num_steps: 4            # Timestep temporali sequenziali
     dropout: 0.1
     checkpoint_name: ltc_wine_quality.pt

@@ -14,7 +14,8 @@ def main(args):
     paradigm = args.paradigm
     paradigm_args = getattr(args, paradigm, None)
     if paradigm_args is None:
-        raise ValueError(f"Sezione '{paradigm}' mancante nel config.")
+        print(f"Paradigma '{paradigm}' mancante nel config.")
+        return
 
     run_fn = get_paradigm(paradigm)
 

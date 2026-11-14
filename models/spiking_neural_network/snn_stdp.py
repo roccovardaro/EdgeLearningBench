@@ -103,6 +103,11 @@ class PopulationCurrent(nn.Module):
 def prepare_input(x: torch.Tensor) -> torch.Tensor:
     """Standardizza l'input garantendo valori di intensità in [0, 1]."""
     x_flat = x.flatten(1).float()
+    if x_flat.min() < 0.0:
+        # Gestisce input già normalizzati Z-score (es. normalize: true) riportandoli in [0, 1].
+        x_min = x_flat.amin(dim=1, keepdim=True)
+        x_max = x_flat.amax(dim=1, keepdim=True)
+        return (x_flat - x_min) / (x_max - x_min).clamp_min(1e-6)
     if x_flat.max() > 1.0:
         x_flat = x_flat / 255.0
     return x_flat.clamp(0.0, 1.0)

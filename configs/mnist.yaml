@@ -9,7 +9,7 @@
 
 dataset:
   name: mnist               # mnist | fashion_mnist | cifar10
-  augmentation: false       # false di default per cifre; true applica RandomCrop(28, pad=2) + RandomRotation(10)
+  augmentation: true       # false di default per cifre; true applica RandomCrop(28, pad=2) + RandomRotation(10)
   normalize: true           # Normalizzazione Z-score; impostare a false esclusivamente se si esegue snn_stdp
   num_workers: 2            # Worker DataLoader (0 di default; es. 2 su Colab/Linux)
 
@@ -90,7 +90,7 @@ direct_kan:
   model:
     input_dim: 784
     num_classes: 10
-    hidden_dims: [128, 64]
+    hidden_dims: [64, 64]
     grid_size: 5
     spline_order: 3
     dropout: 0.1
@@ -114,7 +114,7 @@ snn_mlp:
     num_classes: 10
     hidden_dims: [512, 256]
     beta: 0.95
-    num_steps: 16
+    num_steps: 4
     dropout: 0.2
     encoding: direct         # direct | rate
     checkpoint_name: snn_mlp_mnist.pt
@@ -142,7 +142,7 @@ ltc:
   train:
     epochs: 20
     lr: 0.001
-    batch_size: 64
+    batch_size: 128
     weight_decay: 0.0001
   eval:
     batch_size: 128
@@ -205,7 +205,7 @@ cnn_kan:
   train:
     epochs: 15
     lr: 0.005
-    batch_size: 64
+    batch_size: 128
     weight_decay: 0.0005
     regularization_lambda: 0.005
   eval:
@@ -226,7 +226,7 @@ cnn_ltc:
   train:
     epochs: 20
     lr: 0.001
-    batch_size: 64
+    batch_size: 128
     weight_decay: 0.0001
   eval:
     batch_size: 128
@@ -307,7 +307,7 @@ snn_resnet:
   train:
     epochs: 15
     lr: 0.001
-    batch_size: 64
+    batch_size: 128
     weight_decay: 0.0001
     mem_weight: 1.0
     spike_weight: 1.0
@@ -372,7 +372,7 @@ cnn_snn:
     dropout: 0.2
     baseline_checkpoint: cnn_mnist.pt
     checkpoint_name: cnn_snn_mnist.pt
-    num_steps: 32
+    num_steps: 64
     conversion_mode: "99.9%"
   train:
     batch_size: 128

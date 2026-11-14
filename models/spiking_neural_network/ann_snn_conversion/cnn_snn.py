@@ -19,6 +19,7 @@ from device import get_device
 from paths import CHECKPOINT_DIR, RESULTS_DIR
 from profiler.snn_profiler import SNNProfiler
 from models.baseline.cnn import build_cnn, CNNClassifier
+from models.spiking_neural_network.ann_snn_conversion.costs import compute_conversion_costs
 
 from spikingjelly.activation_based import ann2snn, functional
 
@@ -133,6 +134,14 @@ def cnn_snn_run(args, train_loader, test_loader, profiler=None, device=None):
 
     # 1. Carica la CNN pre-addestrata
     ann_model = load_cnn_from_checkpoint(checkpoint_name, device, fallback_cfg=fallback_cfg)
+
+    # Calcola e stampa i costi computazionali di calibrazione e conversione (in MAC) per la tesi
+    calib_costs = compute_conversion_costs(ann_model, train_loader=train_loader)
+    budget_tracker = getattr(args, "budget_tracker", None)
+    if budget_tracker is not None:
+        budget_tracker.cum_macs += calib_costs["calibration_macs"]
+        budget_tracker.cum_fwd_macs += calib_costs["calibration_macs"]
+        budget_tracker.samples_seen += calib_costs["num_calib_samples"]
 
     # 2. Converti in SNN
     snn_model = convert_cnn_to_snn(ann_model, train_loader, device, mode=mode)

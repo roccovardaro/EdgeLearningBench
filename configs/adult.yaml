@@ -23,7 +23,7 @@ dataset:
   num_workers: 2            # Worker DataLoader (0 di default; es. 2 su Colab/Linux)
 
 # Paradigma attivo:
-# mlp | kan | direct_kan | snn_mlp | ltc | ff_mlp
+# mlp | kan | direct_kan | snn_mlp | mlp_snn | ltc | ff_mlp | chl
 paradigm: mlp
 
 # Dispositivo di calcolo: auto | cpu | mps | cuda | cuda:0
@@ -66,11 +66,11 @@ kan:
     use_input_norm: true
     checkpoint_name: kan_adult.pt
   train:
-    epochs: 10
+    epochs: 15
     lr: 0.003
     batch_size: 128
-    weight_decay: 0.001
-    regularization_lambda: 0.005
+    weight_decay: 0.0001
+    regularization_lambda: 0.001
   eval:
     batch_size: 256
 
@@ -83,15 +83,15 @@ direct_kan:
     hidden_dims: [16, 8]
     grid_size: 3
     spline_order: 3
-    dropout: 0.0
+    dropout: 0.1
     use_input_norm: true
     checkpoint_name: direct_kan_adult.pt
   train:
-    epochs: 10
+    epochs: 15
     lr: 0.003
     batch_size: 128
     weight_decay: 0.0001
-    regularization_lambda: 0.005
+    regularization_lambda: 0.001
   eval:
     batch_size: 256
 
@@ -118,6 +118,22 @@ snn_mlp:
     batch_size: 256
 
 
+# ── MLP-SNN (Conversione ANN-to-SNN via SpikingJelly) ─────────
+mlp_snn:
+  model:
+    input_dim: 108
+    num_classes: 2
+    hidden_dims: [128, 64]
+    baseline_checkpoint: mlp_adult.pt
+    checkpoint_name: mlp_snn_adult.pt
+    num_steps: 32
+    conversion_mode: "99.9%"
+  train:
+    batch_size: 128
+  eval:
+    batch_size: 256
+
+
 # ── LTC (Liquid Time-Constant Network con dinamica ODE) ───────
 ltc:
   model:
@@ -128,7 +144,7 @@ ltc:
     dropout: 0.1
     checkpoint_name: ltc_adult.pt
   train:
-    epochs: 13
+    epochs: 15
     lr: 0.003
     batch_size: 128
     weight_decay: 0.0001
@@ -152,7 +168,6 @@ ff_mlp:
     batch_size: 256
 
 
-
 # ── CHL (Contrastive Hebbian Learning Ricorrente) ───────────────
 chl:
   model:
@@ -170,4 +185,3 @@ chl:
     batch_size: 128
   eval:
     batch_size: 256
-

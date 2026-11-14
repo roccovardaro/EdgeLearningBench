@@ -129,8 +129,7 @@ def build_kan(input_dim, num_classes, hidden_dims=(64, 64),
     print(f"KAN Mode: {mode_str}")
     print(f"KAN layers: {[in_dim] + list(hidden_dims) + [num_classes]}")
     print(f"Grid size: {grid_size}, Spline order: {spline_order}, Dropout: {dropout}")
-    print(f"Parametri — Norm: {norm_params:,}  Proj: {proj_params:,}  "
-          f"KAN: {kan_params:,}  Totale: {total_params:,}")
+    print(f"Parametri totali: {total_params:,} (Norm: {norm_params:,}, Proj: {proj_params:,}, KAN: {kan_params:,})")
     return model
 
 

@@ -104,7 +104,7 @@ def build_cnn_kan(in_channels=3, num_classes=10,
     print(f"CNN output dim: {model.cnn.out_dim}")
     print(f"KAN layers: {[model.cnn.out_dim] + list(hidden_dims) + [num_classes]}")
     print(f"Grid size: {grid_size}, Spline order: {spline_order}")
-    print(f"Parametri — CNN: {cnn_params:,}  KAN: {kan_params:,}  Totale: {total_params:,}")
+    print(f"Parametri totali: {total_params:,} (CNN: {cnn_params:,}, KAN: {kan_params:,})")
     return model
 
 
