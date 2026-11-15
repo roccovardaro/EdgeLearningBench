@@ -13,6 +13,7 @@ from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from spikingjelly.activation_based import base, functional, layer, learning, neuron
 
@@ -98,27 +99,85 @@ class PopulationCurrent(nn.Module):
         ) - self.inhibition * (previous.sum(-1, keepdim=True) - previous)
 
 
+# ── Pre-elaborazione bio-ispirata (Difference of Gaussians) ──────────────────
+
+class RetinalDoGFilter(nn.Module):
+    """
+    Filtro bio-ispirato Difference of Gaussians (DoG) che emula il filtraggio
+    retinico ON-center / OFF-surround del sistema visivo biologico.
+    Estrae i gradienti di contrasto ed elimina lo sfondo a bassa frequenza,
+    garantendo sparsità ed evitando la saturazione sinaptica nell'STDP.
+    """
+
+    def __init__(self, size: int = 5, sigma1: float = 1.0, sigma2: float = 2.0):
+        super().__init__()
+        k = size // 2
+        y, x = torch.meshgrid(torch.arange(-k, k + 1), torch.arange(-k, k + 1), indexing="ij")
+        r2 = (x**2 + y**2).float()
+        g1 = torch.exp(-r2 / (2.0 * sigma1**2)) / (2.0 * math.pi * sigma1**2)
+        g2 = torch.exp(-r2 / (2.0 * sigma2**2)) / (2.0 * math.pi * sigma2**2)
+        dog = g1 - g2
+        dog = dog - dog.mean()
+        self.register_buffer("kernel_1c", dog.unsqueeze(0).unsqueeze(0))
+
+    def forward(self, x: torch.Tensor, target_dim: Optional[int] = None) -> torch.Tensor:
+        if x.dim() != 4:
+            x_flat = x.flatten(1).float()
+            if x_flat.min() < 0.0:
+                x_min = x_flat.amin(dim=1, keepdim=True)
+                x_max = x_flat.amax(dim=1, keepdim=True)
+                return (x_flat - x_min) / (x_max - x_min).clamp_min(1e-6)
+            if x_flat.max() > 1.0:
+                x_flat = x_flat / 255.0
+            return x_flat.clamp(0.0, 1.0)
+
+        b, c, h, w = x.shape
+        if c == 3 and target_dim is not None and target_dim == (h * w):
+            x = 0.2989 * x[:, 0:1] + 0.5870 * x[:, 1:2] + 0.1140 * x[:, 2:3]
+            c = 1
+
+        k = self.kernel_1c.to(device=x.device, dtype=x.dtype)
+        if c > 1:
+            kernel = k.repeat(c, 1, 1, 1)
+            filtered = F.conv2d(x, kernel, padding=k.shape[-1] // 2, groups=c)
+        else:
+            filtered = F.conv2d(x, k, padding=k.shape[-1] // 2)
+
+        edges = F.relu(filtered)
+        flat = edges.view(b, -1)
+        max_val = flat.amax(dim=1, keepdim=True).clamp_min(1e-6)
+        return (flat / max_val).clamp(0.0, 1.0)
+
+
 # ── Utilità Input e Covarianza ───────────────────────────────────────────────
 
-def prepare_input(x: torch.Tensor) -> torch.Tensor:
-    """Standardizza l'input garantendo valori di intensità in [0, 1]."""
+def prepare_input(
+    x: torch.Tensor,
+    dog_filter: Optional[RetinalDoGFilter] = None,
+    target_dim: Optional[int] = None,
+) -> torch.Tensor:
+    """Standardizza l'input garantendo valori di intensità in [0, 1] e applicando DoG se presente."""
+    if dog_filter is not None:
+        return dog_filter(x, target_dim=target_dim)
+
     x_flat = x.flatten(1).float()
-    if x_flat.min() < 0.0:
-        # Gestisce input già normalizzati Z-score (es. normalize: true) riportandoli in [0, 1].
-        x_min = x_flat.amin(dim=1, keepdim=True)
-        x_max = x_flat.amax(dim=1, keepdim=True)
-        return (x_flat - x_min) / (x_max - x_min).clamp_min(1e-6)
     if x_flat.max() > 1.0:
         x_flat = x_flat / 255.0
     return x_flat.clamp(0.0, 1.0)
 
 
-def compute_dataset_covariance(loader, max_samples: int = 5000, device: str = "cpu") -> torch.Tensor:
+def compute_dataset_covariance(
+    loader,
+    max_samples: int = 5000,
+    device: str = "cpu",
+    dog_filter: Optional[RetinalDoGFilter] = None,
+    target_dim: Optional[int] = None,
+) -> torch.Tensor:
     """Calcola la covarianza spaziale non supervisionata dei pixel per bilanciare il gain."""
     samples = []
     total = 0
     for imgs, _ in loader:
-        samples.append(prepare_input(imgs))
+        samples.append(prepare_input(imgs, dog_filter=dog_filter, target_dim=target_dim).cpu())
         total += len(imgs)
         if total >= max_samples:
             break
@@ -144,6 +203,7 @@ class SpikingSTDP(nn.Module):
         inhibition_tau: float = 5.0,
         refractory_steps: int = 5,
         bias_initial: float = 0.01,
+        use_dog: bool = False,
         covariance: Optional[torch.Tensor] = None,
         device: str = "cpu",
     ):
@@ -152,6 +212,8 @@ class SpikingSTDP(nn.Module):
         self.num_classes = num_classes
         self.hidden_neurons = hidden_neurons
         self.num_steps = num_steps
+        self.use_dog = use_dog
+        self.dog_filter = RetinalDoGFilter() if use_dog else None
 
         # 1. Sinapsi lineare positiva e normalizzata
         self.synapse = nn.Linear(input_dim, hidden_neurons, bias=False)
@@ -190,6 +252,10 @@ class SpikingSTDP(nn.Module):
         self.register_buffer("assigned_labels", torch.full((hidden_neurons,), -1, dtype=torch.long))
         self.register_buffer("assigned_weights", torch.ones((hidden_neurons,), dtype=torch.float32))
 
+    def prepare_input(self, x: torch.Tensor) -> torch.Tensor:
+        """Standardizza o filtra l'input prima dell'encoding a impulsi."""
+        return prepare_input(x, dog_filter=self.dog_filter, target_dim=self.input_dim)
+
     @torch.no_grad()
     def input_variance(self) -> torch.Tensor:
         w = self.synapse.weight
@@ -207,7 +273,7 @@ class SpikingSTDP(nn.Module):
         """Integrazione temporale standard per inferenza (conforme a SpikingMLP)."""
         functional.reset_net(self)
         dev = self.synapse.weight.device
-        x_flat = prepare_input(x).to(dev)
+        x_flat = self.prepare_input(x).to(dev)
         prob_scale = min(0.8, max(0.01, 45.0 / self.num_steps))
         probability = x_flat * prob_scale
 
@@ -230,8 +296,8 @@ class SpikingSTDP(nn.Module):
         learner.reset()
         dev = self.synapse.weight.device
 
-        #Costruzione corrente costante per ciascun pixel
-        x_flat = prepare_input(x).to(dev)
+        # Costruzione corrente costante per ciascun pixel
+        x_flat = self.prepare_input(x).to(dev)
         prob_scale = min(0.8, max(0.01, 45.0 / self.num_steps))
         probability = x_flat * prob_scale
 
@@ -353,6 +419,7 @@ def build_snn_stdp(
     inhibition_tau: float = 5.0,
     refractory_steps: int = 5,
     bias_initial: float = 0.01,
+    use_dog: bool = False,
     covariance: Optional[torch.Tensor] = None,
     device: str = "cpu",
 ) -> SpikingSTDP:
@@ -368,12 +435,13 @@ def build_snn_stdp(
         inhibition_tau=inhibition_tau,
         refractory_steps=refractory_steps,
         bias_initial=bias_initial,
+        use_dog=use_dog,
         covariance=covariance,
         device=device,
     )
     total_params = sum(p.numel() for p in model.parameters())
     print(f"SNN-STDP layers: [{input_dim} -> {hidden_neurons} (AdaptiveLIF) -> {num_classes} (Voting)]")
-    print(f"Timesteps: {num_steps} | V_th: {v_threshold} | Inibizione: {inhibition} | Omeostasi: {homeostasis_gain}")
+    print(f"Timesteps: {num_steps} | V_th: {v_threshold} | Inibizione: {inhibition} | Omeostasi: {homeostasis_gain} | DoG: {use_dog}")
     print(f"Parametri totali: {total_params:,}")
     return model
 
@@ -398,11 +466,21 @@ def snn_stdp_run(args, train_loader, test_loader, profiler=None, device=None) ->
     inhibition_tau = getattr(args.model, "inhibition_tau", 5.0)
     refractory_steps = getattr(args.model, "refractory_steps", 5)
     bias_initial = getattr(args.model, "bias_initial", 0.01)
+    use_dog = getattr(args.model, "use_dog", False)
 
     device = get_device(device)
 
-    # 1. Calcolo covarianza pixel non supervisionata
-    covariance = compute_dataset_covariance(train_loader, max_samples=5000, device=device)
+    # 1. Filtro DoG preliminare per calcolo covarianza
+    dog_filter = RetinalDoGFilter() if use_dog else None
+
+    # Calcolo covarianza pixel non supervisionata
+    covariance = compute_dataset_covariance(
+        train_loader,
+        max_samples=5000,
+        device=device,
+        dog_filter=dog_filter,
+        target_dim=input_dim,
+    )
 
     # 2. Costruzione modello
     model = build_snn_stdp(
@@ -416,6 +494,7 @@ def snn_stdp_run(args, train_loader, test_loader, profiler=None, device=None) ->
         inhibition_tau=inhibition_tau,
         refractory_steps=refractory_steps,
         bias_initial=bias_initial,
+        use_dog=use_dog,
         covariance=covariance,
         device=device,
     )
@@ -440,6 +519,8 @@ def snn_stdp_run(args, train_loader, test_loader, profiler=None, device=None) ->
 
     # ── Training (STDP non supervisionato) ───────────────────────
     budget_stop = False
+    train_acc = 0.0
+    silent_pct = 0.0
     try:
         for epoch in range(epochs):
             model.train()
@@ -473,10 +554,12 @@ def snn_stdp_run(args, train_loader, test_loader, profiler=None, device=None) ->
 
             learner.disable()
 
-            # Assegnazione etichette ai neuroni e calcolo accuratezza di calibrazione
-            assignment, train_acc = model.assign_labels(train_loader, max_samples=calib_samples, device=device)
+            # Assegnazione etichette ai neuroni ogni 2 epoche o all'ultima epoca / stop del budget
+            if ((epoch + 1) % 2 == 0) or (epoch + 1 == epochs) or budget_stop:
+                assignment, train_acc = model.assign_labels(train_loader, max_samples=calib_samples, device=device)
+                silent_pct = (assignment == -1).float().mean().item() * 100.0
+
             weight_change = (model.synapse.weight - initial_weight).abs().mean().item()
-            silent_pct = (assignment == -1).float().mean().item() * 100.0
 
             print(
                 f"Epoch {epoch + 1:3d}/{epochs} | "
@@ -485,14 +568,15 @@ def snn_stdp_run(args, train_loader, test_loader, profiler=None, device=None) ->
                 f"silent={silent_pct:.1f}%"
             )
 
-            if profiler:
-                profiler.log_epoch(epoch + 1, 0.0, train_acc)
+            profiler.log_epoch(epoch + 1, 0.0, train_acc)
             snn_prof.log_epoch(epoch + 1)
 
             if budget_stop:
                 break
 
         # ── Valutazione ─────────────────────────────────────────────
+        args.edge_profiler.stop()
+
         snn_prof.reset()
         test_acc = accuracy(model, test_loader, device=device)
         snn_prof.log_epoch("test", tag="test")
@@ -500,8 +584,7 @@ def snn_stdp_run(args, train_loader, test_loader, profiler=None, device=None) ->
         print(f"Train accuracy: {train_acc:.4f}  (error: {1 - train_acc:.4f})")
         print(f"Test  accuracy: {test_acc:.4f}  (error: {1 - test_acc:.4f})")
 
-        if profiler:
-            profiler.log_eval(train_acc, test_acc)
+        profiler.log_eval(train_acc, test_acc)
 
         snn_prof.print_summary()
         snn_prof.export_csv()
@@ -521,6 +604,7 @@ def snn_stdp_run(args, train_loader, test_loader, profiler=None, device=None) ->
                 "inhibition_tau": inhibition_tau,
                 "refractory_steps": refractory_steps,
                 "bias_initial": bias_initial,
+                "use_dog": use_dog,
                 "backend": "spikingjelly_stdp",
             },
             "assigned_labels": model.assigned_labels.cpu(),

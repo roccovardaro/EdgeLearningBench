@@ -9,9 +9,9 @@
 
 dataset:
   name: mnist               # mnist | fashion_mnist | cifar10
-  augmentation: true       # false di default per cifre; true applica RandomCrop(28, pad=2) + RandomRotation(10)
-  normalize: true           # Normalizzazione Z-score; impostare a false esclusivamente se si esegue snn_stdp
-  num_workers: 2            # Worker DataLoader (0 di default; es. 2 su Colab/Linux)
+  augmentation: false       # false di default per cifre; true applica RandomCrop(28, pad=2) + RandomRotation(10)
+  normalize: false           # Normalizzazione Z-score; impostare a false esclusivamente se si esegue snn_stdp
+  num_workers: 2           # Worker DataLoader (0 di default; es. 2 su Colab/Linux)
 
 # Paradigma attivo:
 # ff_mlp | ff_resnet | resnet | cnn | kan | direct_kan | mlp | cnn_kan |
@@ -326,7 +326,7 @@ snn_stdp:
   model:
     input_dim: 784
     hidden_neurons: 400
-    homeostasis_gain: 0.02
+    homeostasis_gain: 0.015
     inhibition: 0.15
     v_threshold: 0.01
     inhibition_tau: 2.0
@@ -336,10 +336,10 @@ snn_stdp:
     checkpoint_name: snn_stdp_mnist.pt
   train:
     epochs: 6
-    ltp: 0.000875
-    batch_size: 32
-    train_samples: 30000
-    calibration_samples: 2000
+    ltp: 0.0018
+    batch_size: 128
+    train_samples: 50000
+    calibration_samples: 5000
   eval:
     batch_size: 128
     test_samples: 10000

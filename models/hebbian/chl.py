@@ -326,13 +326,14 @@ def chl_run(args, train_loader, test_loader, profiler=None, device=None) -> CHLN
             f"Tempo: {elapsed:.2f}s"
         )
 
-        if profiler:
-            profiler.log_epoch(epoch + 1, loss=epoch_loss, acc=train_acc, time_sec=elapsed)
+        profiler.log_epoch(epoch + 1, loss=epoch_loss, acc=train_acc, time_sec=elapsed)
 
         if budget_stop:
             break
 
     # ── Valutazione Finale ───────────────────────────────────────────────
+    args.edge_profiler.stop()
+
     print("\n" + "=" * 65)
     print("VALUTAZIONE FINALE CONTRASTIVE HEBBIAN LEARNING")
     print("=" * 65)
@@ -342,8 +343,7 @@ def chl_run(args, train_loader, test_loader, profiler=None, device=None) -> CHLN
     print(f"Train accuracy: {train_acc:.4f}  (error: {1 - train_acc:.4f})")
     print(f"Test  accuracy: {test_acc:.4f}  (error: {1 - test_acc:.4f})")
 
-    if profiler:
-        profiler.log_eval(train_acc, test_acc)
+    profiler.log_eval(train_acc, test_acc)
 
     # Salvataggio checkpoint
     ckpt_path = CHECKPOINT_DIR / checkpoint_name

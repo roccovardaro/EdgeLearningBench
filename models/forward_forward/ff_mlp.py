@@ -108,7 +108,7 @@ class FFNet(nn.Module):
         self.to(device)
         self._trained_layers = 0
 
-        if budget_tracker is None and profiler is not None:
+        if budget_tracker is None:
             budget_tracker = getattr(profiler, "budget_tracker", None)
 
         budget_stop = False
@@ -174,13 +174,12 @@ class FFNet(nn.Module):
                     f"train_acc={correct / max(1, total):.4f}"
                 )
 
-                if profiler:
-                    profiler.log_epoch(
-                        epoch=layer_idx * epochs_per_layer + epoch + 1,
-                        loss=total_loss / max(1, total),
-                        acc=correct / max(1, total),
-                        layer=layer_idx + 1,
-                    )
+                profiler.log_epoch(
+                    epoch=layer_idx * epochs_per_layer + epoch + 1,
+                    loss=total_loss / max(1, total),
+                    acc=correct / max(1, total),
+                    layer=layer_idx + 1,
+                )
 
                 if budget_stop:
                     break
@@ -241,13 +240,14 @@ def ff_mlp_run(args, train_loader, test_loader, profiler=None, device=None):
     budget_tracker = getattr(args, "budget_tracker", getattr(profiler, "budget_tracker", None))
     model.fit(train_loader, epochs_per_layer=epochs_per_layer, lr=lr, device=device, profiler=profiler, budget_tracker=budget_tracker)
 
+    args.edge_profiler.stop()
+
     train_acc = accuracy(model, train_loader, device=device)
     test_acc = accuracy(model, test_loader, device=device)
     print(f"Train accuracy: {train_acc:.4f}  (error: {1 - train_acc:.4f})")
     print(f"Test  accuracy: {test_acc:.4f}  (error: {1 - test_acc:.4f})")
 
-    if profiler:
-        profiler.log_eval(train_acc, test_acc)
+    profiler.log_eval(train_acc, test_acc)
 
     # Salva checkpoint
     checkpoint_path = CHECKPOINT_DIR / args.model.checkpoint_name

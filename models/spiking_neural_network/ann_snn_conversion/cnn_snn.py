@@ -152,6 +152,8 @@ def cnn_snn_run(args, train_loader, test_loader, profiler=None, device=None):
     snn_prof = SNNProfiler(model=snn_model, tag="cnn_snn", output_dir=RESULTS_DIR, num_steps=T)
 
     # 3. Valuta la SNN
+    args.edge_profiler.stop()
+
     snn_acc = evaluate_cnn_snn(snn_model, test_loader, device, T=T, snn_prof=snn_prof)
 
     # Calcolo ed esportazione metriche neuromorfiche
@@ -159,8 +161,7 @@ def cnn_snn_run(args, train_loader, test_loader, profiler=None, device=None):
     snn_prof.print_summary()
     snn_prof.export_csv()
 
-    if profiler:
-        profiler.log_eval(0.0, snn_acc)
+    profiler.log_eval(0.0, snn_acc)
 
     # 4. Salva il checkpoint del modello SNN convertito
     checkpoint_path = CHECKPOINT_DIR / checkpoint_out

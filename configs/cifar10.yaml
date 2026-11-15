@@ -11,8 +11,8 @@
 dataset:
   name: cifar10             # mnist | fashion_mnist | cifar10
   augmentation: true        # Data augmentation abilitata (RandomCrop + RandomHorizontalFlip)
-  normalize: true           # Normalizzazione Z-score a 3 canali RGB
-  num_workers: 2            # Worker DataLoader (0 di default; es. 2 su Colab/Linux)
+  normalize: false           # Normalizzazione Z-score a 3 canali RGB
+  num_workers: 2           # Worker DataLoader (0 di default; es. 2 su Colab/Linux)
 
 # Paradigma attivo:
 # ff_mlp | ff_resnet | resnet | cnn | kan | direct_kan | mlp | cnn_kan |
@@ -329,20 +329,21 @@ snn_stdp:
   model:
     input_dim: 3072          # 3×32×32 per CIFAR-10
     hidden_neurons: 400
-    homeostasis_gain: 0.02
-    inhibition: 0.15
+    homeostasis_gain: 0.015
+    inhibition: 0.12
     v_threshold: 0.01
     inhibition_tau: 2.0
     refractory_steps: 2
     bias_initial: 0.005
-    num_steps: 64
+    num_steps: 32
+    use_dog: true            # Pre-elaborazione bio-ispirata retina ON-center (Difference of Gaussians)
     checkpoint_name: snn_stdp_cifar10.pt
   train:
-    epochs: 8
-    ltp: 0.000875
-    batch_size: 32
-    train_samples: 20000
-    calibration_samples: 2000
+    epochs: 6
+    ltp: 0.0015
+    batch_size: 128
+    train_samples: 30000
+    calibration_samples: 3000
   eval:
     batch_size: 128
     test_samples: 10000

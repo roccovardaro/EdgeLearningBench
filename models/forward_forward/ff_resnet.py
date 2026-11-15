@@ -219,7 +219,7 @@ class FFResNet(nn.Module):
         self.history = []
         self._trained_blocks = 0
 
-        if budget_tracker is None and profiler is not None:
+        if budget_tracker is None:
             budget_tracker = getattr(profiler, "budget_tracker", None)
 
         budget_stop = False
@@ -330,23 +330,24 @@ def ff_resnet_run(args, train_loader, test_loader, profiler=None, device=None):
     budget_tracker = getattr(args, "budget_tracker", getattr(profiler, "budget_tracker", None))
     model.fit(train_loader, args.train.epochs_per_layer, args.train.lr, device, profiler=profiler, budget_tracker=budget_tracker)
     
+    args.edge_profiler.stop()
+
     train_acc = accuracy(model, train_loader, device)
     test_acc = accuracy(model, test_loader, device)
     print(f"Train accuracy: {train_acc:.4f}  (error: {1 - train_acc:.4f})")
     print(f"Test  accuracy: {test_acc:.4f}  (error: {1 - test_acc:.4f})")
 
-    if profiler:
-        for idx, rec in enumerate(model.history):
-            profiler.log_epoch(
-                epoch=idx + 1,
-                loss=rec["loss"],
-                acc=rec.get("pair_accuracy"),
-                block=rec.get("block"),
-                block_epoch=rec.get("epoch"),
-                g_pos=rec.get("g_pos"),
-                g_neg=rec.get("g_neg"),
-            )
-        profiler.log_eval(train_acc, test_acc)
+    for idx, rec in enumerate(model.history):
+        profiler.log_epoch(
+            epoch=idx + 1,
+            loss=rec["loss"],
+            acc=rec.get("pair_accuracy"),
+            block=rec.get("block"),
+            block_epoch=rec.get("epoch"),
+            g_pos=rec.get("g_pos"),
+            g_neg=rec.get("g_neg"),
+        )
+    profiler.log_eval(train_acc, test_acc)
 
     checkpoint_path = Path(CHECKPOINT_DIR) / args.model.checkpoint_name
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)

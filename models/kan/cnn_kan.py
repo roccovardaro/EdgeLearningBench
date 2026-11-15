@@ -182,20 +182,20 @@ def cnn_kan_run(args, train_loader, test_loader, profiler=None, device=None):
             f"train_acc={train_acc:.4f}"
         )
 
-        if profiler:
-            profiler.log_epoch(epoch + 1, epoch_loss, train_acc)
+        profiler.log_epoch(epoch + 1, epoch_loss, train_acc)
 
         if budget_stop:
             break
 
     # ── Valutazione ─────────────────────────────────────────────
+    args.edge_profiler.stop()
+
     train_acc = accuracy(model, train_loader, device)
     test_acc = accuracy(model, test_loader, device)
     print(f"Train accuracy: {train_acc:.4f}  (error: {1 - train_acc:.4f})")
     print(f"Test  accuracy: {test_acc:.4f}  (error: {1 - test_acc:.4f})")
 
-    if profiler:
-        profiler.log_eval(train_acc, test_acc)
+    profiler.log_eval(train_acc, test_acc)
 
     # ── Checkpoint ──────────────────────────────────────────────
     checkpoint_path = CHECKPOINT_DIR / args.model.checkpoint_name

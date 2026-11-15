@@ -33,17 +33,15 @@ def main(args):
     device = get_device(getattr(args, "device", "auto"))
     print(f"Device: {device}")
 
-    # Setup profiler (hardware e metriche)
+    # Setup profiler (sempre attivi nel progetto)
     p_cfg = getattr(args, "profiler", None)
     edge_prof = EdgeProfiler(
-        interval_sec=getattr(p_cfg, "interval_sec", 1.0),
-        track_energy=getattr(p_cfg, "track_energy", True),
+        interval_sec=getattr(p_cfg, "interval_sec", 1.0) if p_cfg else 1.0,
+        track_energy=getattr(p_cfg, "track_energy", True) if p_cfg else True,
         tag=tag,
         output_dir=RESULTS_DIR,
-    ) if getattr(p_cfg, "enabled", False) else None
-
-    te_cfg = getattr(args, "train_eval_profiler", None)
-    train_prof = TrainEvalProfiler(tag=tag, output_dir=RESULTS_DIR) if getattr(te_cfg, "enabled", False) else None
+    )
+    train_prof = TrainEvalProfiler(tag=tag, output_dir=RESULTS_DIR)
 
     # Setup Budget Tracker (controllo budget computazionale fisso)
     b_cfg = getattr(args, "budget", None)
@@ -58,30 +56,26 @@ def main(args):
 
     if budget_tracker:
         paradigm_args.budget_tracker = budget_tracker
-        if train_prof is None and budget_tracker.enabled:
-            train_prof = TrainEvalProfiler(tag=tag, output_dir=RESULTS_DIR)
-        if train_prof:
-            train_prof.budget_tracker = budget_tracker
+        train_prof.budget_tracker = budget_tracker
     else:
         paradigm_args.budget_tracker = None
 
-    if edge_prof:
-        edge_prof.start()
+    paradigm_args.edge_profiler = edge_prof
+
+    edge_prof.start()
 
     try:
         # ESEGUE IL PARADIGMA SELEZIONATO (TRAIN + EVAL)
         run_fn(paradigm_args, train_loader, test_loader, profiler=train_prof, device=device)
     finally:
-        if edge_prof:
-            edge_prof.stop()
-            edge_prof.print_summary()
-            if getattr(p_cfg, "export_csv", True):
-                edge_prof.export_csv()
-            if getattr(p_cfg, "export_json", True):
-                edge_prof.export_json()
+        edge_prof.stop()
+        edge_prof.print_summary()
+        if getattr(p_cfg, "export_csv", True) if p_cfg else True:
+            edge_prof.export_csv()
+        if getattr(p_cfg, "export_json", True) if p_cfg else True:
+            edge_prof.export_json()
 
-        if train_prof and getattr(te_cfg, "export_csv", True):
-            train_prof.export_csv()
+        train_prof.export_csv()
 
         if budget_tracker and budget_tracker.enabled:
             budget_tracker.print_summary()

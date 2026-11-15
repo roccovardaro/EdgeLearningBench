@@ -239,8 +239,7 @@ def snn_mlp_run(args, train_loader, test_loader, profiler=None, device=None):
             f"loss={epoch_loss:.4f} | "
             f"train_acc={train_acc:.4f}"
         )
-        if profiler:
-            profiler.log_epoch(epoch + 1, epoch_loss, train_acc)
+        profiler.log_epoch(epoch + 1, epoch_loss, train_acc)
 
         snn_prof.log_epoch(epoch + 1)
 
@@ -248,6 +247,8 @@ def snn_mlp_run(args, train_loader, test_loader, profiler=None, device=None):
             break
 
     # ── Valutazione ─────────────────────────────────────────────
+    args.edge_profiler.stop()
+
     train_acc = accuracy(model, train_loader, device)
     snn_prof.reset()
     test_acc = accuracy(model, test_loader, device)
@@ -256,8 +257,7 @@ def snn_mlp_run(args, train_loader, test_loader, profiler=None, device=None):
     print(f"Train accuracy: {train_acc:.4f}  (error: {1 - train_acc:.4f})")
     print(f"Test  accuracy: {test_acc:.4f}  (error: {1 - test_acc:.4f})")
 
-    if profiler:
-        profiler.log_eval(train_acc, test_acc)
+    profiler.log_eval(train_acc, test_acc)
 
     snn_prof.print_summary()
     snn_prof.export_csv()

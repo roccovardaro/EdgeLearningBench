@@ -1,30 +1,25 @@
 """
-EdgeProfiler: Profiler leggero per benchmark su sistemi embedded ed Edge (Raspberry Pi, CPU, GPU, Apple Silicon).
+EdgeProfiler: Profiler leggero per benchmark Deep Learning su dispositivi Edge.
 
 Monitora in tempo reale (in background):
-- CPU: utilizzo percentuale del processo, frequenza, temperatura e throttling (Raspberry Pi)
-- RAM: memoria RSS e VMS (processo), picco assoluto (kernel getrusage)
+- TEMPO: durata complessiva in secondi
+- ENERGIA: consumo in Joules, kWh, potenza media in Watt ed emissioni CO2 (via CodeCarbon)
+- RAM: memoria RSS, picco di allocazione di memoria di processo (kernel getrusage)
+- CPU: utilizzo percentuale del processo
 - GPU: memoria allocata (PyTorch CUDA o Apple Silicon MPS)
-- ENERGIA: consumo in kWh, Joules, potenza media in Watt ed emissioni CO2 (via CodeCarbon se installato)
 """
 
 import csv
 import json
 import os
-import shutil
-import subprocess
 import sys
 import threading
 import time
-from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 import psutil
-
-# Rilevamento presenza vcgencmd (Raspberry Pi OS) per evitare chiamate subprocess a vuoto
-_HAS_VCGENCMD = shutil.which("vcgencmd") is not None
 
 # Rilevamento PyTorch (opzionale per GPU tracking)
 try:
@@ -47,74 +42,12 @@ def _get_peak_ram_mb() -> float:
     try:
         import resource
         ru_maxrss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        # Su macOS ru_maxrss è in byte, su Linux (incluso Raspberry Pi) è in kilobyte
+        # Su macOS ru_maxrss è in byte, su Linux è in kilobyte
         if sys.platform == "darwin":
             return ru_maxrss / (1024.0 * 1024.0)
         return ru_maxrss / 1024.0
     except Exception:
         return 0.0
-
-
-def _get_rpi_temperature() -> Optional[float]:
-    """Legge la temperatura del SoC (funziona nativamente su Raspberry Pi / Linux)."""
-    # 1. Linux sysfs (standard Raspberry Pi)
-    thermal_path = "/sys/class/thermal/thermal_zone0/temp"
-    if os.path.exists(thermal_path):
-        try:
-            with open(thermal_path, "r", encoding="utf-8") as f:
-                return float(f.read().strip()) / 1000.0
-        except Exception:
-            pass
-
-    # 2. psutil sensors
-    try:
-        if hasattr(psutil, "sensors_temperatures"):
-            temps = psutil.sensors_temperatures()
-            if temps:
-                for name, entries in temps.items():
-                    if entries:
-                        return float(entries[0].current)
-    except Exception:
-        pass
-
-    # 3. vcgencmd (utility ufficiale Raspberry Pi OS)
-    if _HAS_VCGENCMD:
-        try:
-            out = subprocess.check_output(
-                ["vcgencmd", "measure_temp"],
-                stderr=subprocess.DEVNULL,
-                timeout=0.5
-            ).decode().strip()
-            # Output tipico: temp=48.2'C
-            val = out.replace("temp=", "").replace("'C", "")
-            return float(val)
-        except Exception:
-            pass
-
-    return None
-
-
-def _check_rpi_throttling() -> Optional[Dict[str, Any]]:
-    """Controlla lo stato di thermal/voltage throttling su Raspberry Pi."""
-    if not _HAS_VCGENCMD:
-        return None
-    try:
-        out = subprocess.check_output(
-            ["vcgencmd", "get_throttled"],
-            stderr=subprocess.DEVNULL,
-            timeout=0.5
-        ).decode().strip()
-        val = int(out.split("=")[1], 16)
-        return {
-            "raw_hex": hex(val),
-            "under_voltage": bool(val & 0x1),
-            "freq_capped": bool(val & 0x2),
-            "currently_throttled": bool(val & 0x4),
-            "temp_limit_active": bool(val & 0x8),
-            "has_throttled_past": bool(val & 0x40000),
-        }
-    except Exception:
-        return None
 
 
 def _get_gpu_snapshot() -> Dict[str, Any]:
@@ -154,13 +87,6 @@ class EdgeProfiler:
         tag: Optional[str] = None,
         output_dir: Optional[Union[str, Path]] = None,
     ):
-        """
-        Args:
-            interval_sec: Intervallo di campionamento delle metriche in secondi.
-            track_energy: Se True, attiva CodeCarbon per il tracking energetico.
-            tag: Nome identificativo dell'esperimento (es. 'snn_mlp_cifar10').
-            output_dir: Directory di output per salvataggio automatico di report/CSV.
-        """
         self.interval_sec = max(0.1, interval_sec)
         self.track_energy = track_energy
         self.tag = tag or "benchmark"
@@ -173,7 +99,7 @@ class EdgeProfiler:
 
         self._start_time: float = 0.0
         self._end_time: float = 0.0
-        self._current_phase: str = "main"
+        self._peak_kernel_rss: Optional[float] = None
 
         self.samples: List[Dict[str, Any]] = []
         self._initial_rss_mb: float = 0.0
@@ -205,7 +131,7 @@ class EdgeProfiler:
                 )
 
     def _sample(self) -> Dict[str, Any]:
-        """Esegue un singolo campionamento delle metriche di sistema."""
+        """Esegue un singolo campionamento delle metriche (RAM, CPU, GPU)."""
         now = time.time()
         elapsed = now - self._start_time if self._start_time > 0 else 0.0
 
@@ -217,27 +143,21 @@ class EdgeProfiler:
         proc_rss_mb = mem_info.rss / (1024.0 * 1024.0)
         proc_vms_mb = mem_info.vms / (1024.0 * 1024.0)
 
-        # Temperatura (RPi / Linux)
-        temp_c = _get_rpi_temperature()
-
         # GPU
         gpu_info = _get_gpu_snapshot()
 
         return {
             "timestamp": now,
             "elapsed_sec": round(elapsed, 2),
-            "phase": self._current_phase,
             "cpu_process_pct": proc_cpu,
             "ram_process_rss_mb": round(proc_rss_mb, 2),
             "ram_process_vms_mb": round(proc_vms_mb, 2),
-            "temp_c": round(temp_c, 1) if temp_c is not None else None,
             "gpu_available": gpu_info["available"],
             "gpu_allocated_mb": round(gpu_info["allocated_mb"], 2),
         }
 
     def _monitor_loop(self):
         """Loop eseguito in un thread in background per campionare periodicamente."""
-        # Primo campionamento per inizializzare il calcolo di cpu_percent
         self._process.cpu_percent(interval=None)
 
         while self._running:
@@ -260,6 +180,7 @@ class EdgeProfiler:
             self.samples.clear()
             self._start_time = time.time()
             self._end_time = 0.0
+            self._peak_kernel_rss = None
             self._initial_rss_mb = self._process.memory_info().rss / (1024.0 * 1024.0)
             self._running = True
 
@@ -278,7 +199,7 @@ class EdgeProfiler:
         self._thread.start()
 
     def stop(self) -> Dict[str, Any]:
-        """Interrompe il monitoraggio e calcola il riepilogo finale."""
+        """Interrompe il monitoraggio e congela il riepilogo finale."""
         if not self._running:
             return self.summary()
 
@@ -288,6 +209,7 @@ class EdgeProfiler:
             self._thread = None
 
         self._end_time = time.time()
+        self._peak_kernel_rss = _get_peak_ram_mb()
 
         # Campione finale
         final_sample = self._sample()
@@ -316,21 +238,6 @@ class EdgeProfiler:
 
         return self.summary()
 
-    def set_phase(self, phase_name: str):
-        """Imposta l'etichetta della fase corrente (es. 'train', 'epoch_3', 'eval')."""
-        with self._lock:
-            self._current_phase = phase_name
-
-    @contextmanager
-    def phase(self, phase_name: str):
-        """Context manager per taggare un blocco di esecuzione specifico."""
-        prev_phase = self._current_phase
-        self.set_phase(phase_name)
-        try:
-            yield
-        finally:
-            self.set_phase(prev_phase)
-
     def __enter__(self):
         self.start()
         return self
@@ -340,19 +247,19 @@ class EdgeProfiler:
 
     @property
     def duration_sec(self) -> float:
-        """Durata complessiva dell'esperimento in secondi."""
+        """Durata complessiva del monitoraggio in secondi."""
         if self._start_time == 0.0:
             return 0.0
         end = self._end_time if self._end_time > 0.0 else time.time()
         return max(0.0, end - self._start_time)
 
     def summary(self) -> Dict[str, Any]:
-        """Calcola e restituisce il report sintetico delle metriche."""
+        """Calcola e restituisce il report sintetico delle sole metriche: tempo, energia, RAM, CPU, GPU."""
         with self._lock:
             samples = list(self.samples)
 
         duration = self.duration_sec
-        peak_kernel_rss = _get_peak_ram_mb()
+        peak_kernel_rss = self._peak_kernel_rss if self._peak_kernel_rss is not None else _get_peak_ram_mb()
 
         # Aggregazioni RAM
         rss_values = [s["ram_process_rss_mb"] for s in samples] if samples else [0.0]
@@ -369,12 +276,6 @@ class EdgeProfiler:
         gpu_info = _get_gpu_snapshot()
         gpu_alloc_values = [s["gpu_allocated_mb"] for s in samples if s["gpu_available"]]
         peak_gpu_mb = max(gpu_alloc_values) if gpu_alloc_values else 0.0
-
-        # Aggregazioni Temperatura
-        temp_values = [s["temp_c"] for s in samples if s["temp_c"] is not None]
-        mean_temp = (sum(temp_values) / len(temp_values)) if temp_values else None
-        max_temp = max(temp_values) if temp_values else None
-        throttling_info = _check_rpi_throttling()
 
         return {
             "tag": self.tag,
@@ -396,26 +297,19 @@ class EdgeProfiler:
                 "device_name": gpu_info["device_name"],
                 "peak_allocated_mb": round(peak_gpu_mb, 2),
             },
-            "temperature": {
-                "available": len(temp_values) > 0,
-                "mean_c": round(mean_temp, 1) if mean_temp is not None else None,
-                "max_c": round(max_temp, 1) if max_temp is not None else None,
-                "throttling": throttling_info,
-            },
             "energy": self._energy_data,
         }
 
     def print_summary(self):
-        """Stampa un report visuale pulito a console."""
+        """Stampa un report visuale pulito con tempo, RAM, CPU, GPU ed energia."""
         rep = self.summary()
         ram = rep["ram"]
         cpu = rep["cpu"]
         gpu = rep["gpu"]
-        temp = rep["temperature"]
         energy = rep["energy"]
 
         print("\n" + "=" * 62)
-        print(f"       EDGE PROFILER REPORT: {rep['tag'].upper()}")
+        print(f"       EDGE PROFILER REPORT: {rep['tag'].upper()} (TRAINING)")
         print("=" * 62)
         print(f"  Durata:             {rep['duration_sec']:.2f} s  ({rep['samples_count']} campioni)")
 
@@ -440,21 +334,6 @@ class EdgeProfiler:
         else:
             print("  Dispositivo:        Nessuna GPU rilevata (Esecuzione CPU / Edge)")
 
-        # Temperatura / Raspberry Pi
-        if temp["available"]:
-            print("-" * 62)
-            print("  [TEMPERATURA & THERMAL THROTTLING]")
-            print(f"  Temperatura Media:  {temp['mean_c']} °C  (Max: {temp['max_c']} °C)")
-            if temp["throttling"]:
-                thr = temp["throttling"]
-                warns = []
-                if thr.get("currently_throttled"):
-                    warns.append("IN CORSO!")
-                if thr.get("has_throttled_past"):
-                    warns.append("AVVENUTO IN PASSATO")
-                status = ", ".join(warns) if warns else "OK (Nessun throttling)"
-                print(f"  Stato Throttling:   {status}")
-
         # Energia
         print("-" * 62)
         print("  [ENERGIA & CONSUMI]")
@@ -475,7 +354,9 @@ class EdgeProfiler:
         else:
             now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
             target_dir = self.output_dir or (Path.cwd() / "results")
+            target_dir = Path(target_dir)
             path = target_dir / f"{self.tag}_{suffix}_{now_str}.{ext}"
+
         path.parent.mkdir(parents=True, exist_ok=True)
         return path
 
@@ -520,7 +401,6 @@ class EdgeProfiler:
                 "ram": summary["ram"],
                 "cpu": summary["cpu"],
                 "gpu": summary["gpu"],
-                "temperature": summary["temperature"],
             },
         }
 

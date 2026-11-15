@@ -315,21 +315,22 @@ snn_resnet:
 snn_stdp:
   model:
     input_dim: 784
-    hidden_neurons: 800
-    homeostasis_gain: 0.02
-    inhibition: 0.15
+    hidden_neurons: 400
+    homeostasis_gain: 0.015
+    inhibition: 0.12
     v_threshold: 0.01
     inhibition_tau: 2.0
     refractory_steps: 2
     bias_initial: 0.005
-    num_steps: 50
+    num_steps: 32
+    use_dog: true            # Pre-elaborazione bio-ispirata retina ON-center (Difference of Gaussians)
     checkpoint_name: snn_stdp_fashion_mnist.pt
   train:
     epochs: 6
-    ltp: 0.000875
-    batch_size: 32
-    train_samples: 15000
-    calibration_samples: 2000
+    ltp: 0.0015
+    batch_size: 128
+    train_samples: 30000
+    calibration_samples: 3000
   eval:
     batch_size: 128
     test_samples: 10000
