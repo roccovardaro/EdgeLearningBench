@@ -133,7 +133,7 @@ ltc:
     input_dim: 784
     num_classes: 10
     units: 64
-    num_steps: 8
+    num_steps: 6
     dropout: 0.2
     checkpoint_name: ltc_fashion_mnist.pt
   train:
@@ -214,7 +214,7 @@ cnn_ltc:
     num_classes: 10
     cnn_channels: [32, 64, 128]
     units: 64
-    num_steps: 8
+    num_steps: 6
     dropout: 0.2
     checkpoint_name: cnn_ltc_fashion_mnist.pt
   train:

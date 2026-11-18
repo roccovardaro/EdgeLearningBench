@@ -103,7 +103,7 @@ snn_mlp:
     num_classes: 2
     hidden_dims: [128, 64]
     beta: 0.90              # Decadimento membrana (tau = 10.0)
-    num_steps: 10           # Timestep temporali
+    num_steps: 4            # Timestep temporali
     dropout: 0.1
     encoding: direct        # direct | rate (direct current injection per dati continui e tabellari)
     checkpoint_name: snn_mlp_adult.pt
@@ -140,7 +140,7 @@ ltc:
     input_dim: 108
     num_classes: 2
     units: 32               # Neuroni nella cella LTC FullyConnected
-    num_steps: 10           # Timestep temporali sequenziali
+    num_steps: 4            # Timestep temporali sequenziali
     dropout: 0.1
     checkpoint_name: ltc_adult.pt
   train:
