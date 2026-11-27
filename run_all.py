@@ -11,7 +11,7 @@ def main():
         "--dataset",
         "-d",
         default="mnist",
-        help="Nome del dataset (default: mnist). Opzioni: mnist, cifar10, fashion_mnist, adult, breast_cancer, wine_quality",
+        help="Nome del dataset (default: mnist). Opzioni: mnist, cifar10, fashion_mnist, adult, breast_cancer",
     )
     parser.add_argument(
         "--device",

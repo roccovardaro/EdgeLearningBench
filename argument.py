@@ -9,7 +9,6 @@ DATASET_MAP = {
     "fashion_mnist": "configs/fashion_mnist.yaml",
     "adult": "configs/adult.yaml",
     "breast_cancer": "configs/breast_cancer.yaml",
-    "wine_quality": "configs/wine_quality.yaml",
 }
 
 

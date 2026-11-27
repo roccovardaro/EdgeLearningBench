@@ -15,6 +15,3 @@ data/
 
 checkpoint/
 results/
-mnisttest
-fashionmnisttest
-cifar10test

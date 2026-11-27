@@ -1,7 +1,6 @@
 from datasets.cifar10 import cifar10_dataloaders
 from datasets.fashion_mnist import fashion_mnist_dataloaders
 from datasets.mnist import mnist_dataloaders
-from datasets.wine_quality import wine_quality_dataloaders
 from datasets.breast_cancer import breast_cancer_dataloaders
 from datasets.adult import adult_dataloaders
 
@@ -39,20 +38,6 @@ def get_dataloaders(args):
             test_batch_size=eval_bs,
             augment=augment,
             normalize=normalize,
-            num_workers=num_workers,
-        )
-    if dataset_name in "wine_quality":
-        test_ratio = getattr(args.dataset, "test_ratio", 0.2)
-        seed = getattr(args.dataset, "seed", 42)
-        stratified = getattr(args.dataset, "stratified", True)
-        return wine_quality_dataloaders(
-            batch_size=train_bs,
-            train_batch_size=train_bs,
-            test_batch_size=eval_bs,
-            test_ratio=test_ratio,
-            seed=seed,
-            normalize=normalize,
-            stratified=stratified,
             num_workers=num_workers,
         )
     if dataset_name in "breast_cancer":
